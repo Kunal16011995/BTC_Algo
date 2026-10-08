@@ -50,8 +50,8 @@ TRADING_CAPITAL = 92_453.04
 RISK_PER_TRADE = TRADING_CAPITAL * 0.005      # fixed $462.27 per trade
 DAILY_LOSS_CAP = RISK_PER_TRADE * 2.0          # $924.53 daily loss cap
 LEVERAGE = 2                                   # required so position size can exceed allocated cash
-ENTRY_FEE_PCT = 0.0001                        # maker entry
-EXIT_FEE_PCT = 0.0006                         # taker exit
+ENTRY_FEE_PCT = 0.00055                       # taker entry (confirmed from Bybit executions)
+EXIT_FEE_PCT = 0.00055                        # taker exit (confirmed from Bybit executions)
 
 VARIANTS = {
     "tight": {
