@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Momentum Bot</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  :root {
+    --bg: #0b1020;
+    --card: #161d31;
+    --card-border: #232b45;
+    --text: #e6e9f0;
+    --muted: #8b93ad;
+    --green: #2ce0a6;
+    --red: #f6465d;
+    --accent: #5b8cff;
+    --accent2: #f7c566;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 18px;
+  }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: .5px; }
+  h1 span { color: var(--muted); font-size: 13px; font-weight: 400; margin-left: 10px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .live {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+         animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+  .tabs {
+    display: flex; gap: 8px; margin-bottom: 22px; border-bottom: 1px solid var(--card-border);
+    padding-bottom: 1px;
+  }
+  .tab {
+    background: transparent; border: none; color: var(--muted);
+    padding: 10px 18px; font-size: 13px; font-weight: 600; letter-spacing: .5px;
+    cursor: pointer; border-bottom: 2px solid transparent; transition: .15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .kpis {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 14px; margin-bottom: 22px;
+  }
+  .kpi {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .kpi .label { font-size: 10px; letter-spacing: 1.1px; color: var(--muted);
+                text-transform: uppercase; margin-bottom: 6px; }
+  .kpi .value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .kpi .value.pos { color: var(--green); }
+  .kpi .value.neg { color: var(--red); }
+  .kpi .value.plain { color: var(--text); }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 12px; padding: 18px; margin-bottom: 22px;
+  }
+  .panel h2 { font-size: 13px; letter-spacing: 1px; color: var(--muted);
+              text-transform: uppercase; margin-bottom: 14px; }
+  .panel .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .chart-wrap { position: relative; height: 320px; }
+  .chart-wrap.small { height: 160px; }
+
+  .variant-header { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 8px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: right; font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: 1px;
+       text-transform: uppercase; border-bottom: 1px solid var(--card-border); }
+  td { border-bottom: 1px solid #1b2340; }
+  tr:hover td { background: #1a2138; }
+  .pnl-pos { color: var(--green); }
+  .pnl-neg { color: var(--red); }
+  .side-buy { color: var(--green); font-weight: 600; }
+  .side-sell { color: var(--red); font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+  .bt-toggle {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .15s;
+  }
+  .bt-toggle:hover { background: #1f2742; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>BTC Momentum Bot</h1>
+  </div>
+  <div class="live"><span class="dot"></span> Live · updated <span id="updated">—</span></div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-target="backtest">Backtest</button>
+  <button class="tab" data-target="paper-tight">Forward Test</button>
+</div>
+
+<!-- Backtest tab -->
+<div id="backtest" class="tab-content active">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <div class="variant-header">Backtest — Tight variant (0.4% stop / 0.4% TP1)</div>
+    <button id="bt-one-at-a-time" class="bt-toggle">Show: one trade at a time</button>
+  </div>
+  <div class="kpis" id="bt-kpis"></div>
+  <div class="panel">
+    <h2>Equity Curve</h2>
+    <div class="chart-wrap"><canvas id="bt-equity-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Drawdown %</h2>
+    <div class="chart-wrap small"><canvas id="bt-drawdown-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Recent Backtest Trades</h2>
+    <table>
+      <thead>
+        <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
+      </thead>
+      <tbody id="bt-trade-log"><tr><td colspan="7" class="empty">No data</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Forward Test tab -->
+<div id="paper-tight" class="tab-content">
+  <div class="kpis" id="pt-kpis"></div>
+  <div class="panel">
+    <h2>Equity Curve — Forward Test</h2>
+    <div class="chart-wrap"><canvas id="pt-equity-chart"></canvas></div>
+    <div class="note">Trading capital is fixed at $92,453.04; paper PnL does not affect live Bybit equity.</div>
+  </div>
+  <div class="panel">
+    <h2>Drawdown %</h2>
+    <div class="chart-wrap small"><canvas id="pt-drawdown-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Recent Forward Test Trades</h2>
+    <table>
+      <thead>
+        <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
+      </thead>
+      <tbody id="pt-trade-log"><tr><td colspan="7" class="empty">No closed trades yet</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const GREEN = '#2ce0a6', RED = '#f6465d', ACCENT = '#5b8cff', MUTED = '#8b93ad';
+
+const KPI_LABELS = [
+  ['total_trades', 'Total Trades'],
+  ['win_rate', 'Win Rate'],
+  ['profit_factor', 'Profit Factor'],
+  ['avg_monthly_return', 'Avg Monthly Return'],
+  ['max_drawdown', 'Max Drawdown (Trailing)'],
+  ['max_static_drawdown', 'Max Drawdown (Static)'],
+  ['sharpe_ratio', 'Sharpe Ratio'],
+  ['avg_points_trailed', 'Avg Points Trailed'],
+  ['best_win', 'Best Win'],
+  ['worst_loss', 'Worst Loss'],
+  ['best_r', 'Best R:R'],
+  ['worst_r', 'Worst R:R'],
+  ['avg_win', 'Avg Win'],
+  ['avg_loss', 'Avg Loss'],
+  ['consecutive_wins', 'Consecutive Wins'],
+  ['consecutive_losses', 'Consecutive Losses'],
+  ['final_equity', 'Final Equity (Trading)'],
+  ['total_return', 'Total Return (Trading)'],
+  ['allocated_capital', 'Allocated Capital'],
+];
+
+let btEquityChart, btDrawdownChart, ptEquityChart, ptDrawdownChart;
+let btOneAtATime = false;
+
+function makeEquityChart(canvasId, datasets, logScale = false) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 320);
+  grad.addColorStop(0, 'rgba(91, 140, 255, 0.25)');
+  grad.addColorStop(1, 'rgba(91, 140, 255, 0.0)');
+  if (datasets.length === 1 && !datasets[0].backgroundColor) {
+    datasets[0].backgroundColor = grad;
+    datasets[0].fill = true;
+  }
+  return new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'time',
+             time: { unit: 'day', displayFormats: { day: 'MMM d' }, tooltipFormat: 'MMM d, yyyy' },
+             ticks: { color: MUTED, maxTicksLimit: 8 },
+             grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { type: logScale ? 'logarithmic' : 'linear',
+             ticks: { color: MUTED, callback: v => '$' + v.toLocaleString() },
+             grid: { color: 'rgba(255,255,255,0.06)' } },
+      },
+      plugins: {
+        legend: { labels: { color: MUTED, boxWidth: 14 } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: $${c.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2})}` } },
+      },
+    },
+  });
+}
+
+function makeDrawdownChart(canvasId, datasets) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 160);
+  grad.addColorStop(0, 'rgba(246, 70, 93, 0.35)');
+  grad.addColorStop(1, 'rgba(246, 70, 93, 0.02)');
+  if (datasets.length === 1 && !datasets[0].backgroundColor) {
+    datasets[0].backgroundColor = grad;
+    datasets[0].fill = true;
+  }
+  return new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { type: 'time',
+             time: { unit: 'day', displayFormats: { day: 'MMM d' }, tooltipFormat: 'MMM d, yyyy' },
+             ticks: { color: MUTED, maxTicksLimit: 8 },
+             grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: MUTED, callback: v => v.toFixed(2) + '%' },
+             grid: { color: 'rgba(255,255,255,0.06)' } },
+      },
+      plugins: {
+        legend: { labels: { color: MUTED, boxWidth: 14 } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y.toFixed(2)}%` } },
+      },
+    },
+  });
+}
+
+function toPoints(series) {
+  return series.ts.map((t, i) => ({ x: t * 1000, y: series.values[i] }));
+}
+
+function fmtPct(v, digits = 2) { return v.toFixed(digits) + '%'; }
+function fmtMoney(v) { return '$' + v.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+
+function kpiClass(key, v) {
+  if (['win_rate','profit_factor','avg_monthly_return','total_return','return_on_total_equity','best_win','avg_win','consecutive_wins'].includes(key)) {
+    if (key === 'profit_factor') return v >= 1 ? 'pos' : 'neg';
+    return v >= 0 ? 'pos' : 'neg';
+  }
+  if (['max_drawdown','max_static_drawdown','worst_loss','avg_loss','worst_r','consecutive_losses'].includes(key)) return 'neg';
+  if (key === 'sharpe_ratio' || key === 'best_r') return v >= 1 ? 'pos' : 'plain';
+  return 'plain';
+}
+
+function fmtKpi(key, v) {
+  if (['win_rate','avg_monthly_return','max_drawdown','total_return','return_on_total_equity'].includes(key)) return fmtPct(v);
+  if (['final_equity','total_account_equity','allocated_capital','best_win','worst_loss','avg_win','avg_loss'].includes(key)) return fmtMoney(v);
+  if (key === 'profit_factor') return v === 9999.99 ? '∞' : v.toFixed(2);
+  if (key === 'sharpe_ratio' || key === 'best_r' || key === 'worst_r') return v.toFixed(2);
+  return v.toLocaleString(undefined, {maximumFractionDigits: 2});
+}
+
+function renderKpiCards(containerId, kpis) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = KPI_LABELS.map(([key, label]) => {
+    const v = kpis[key] ?? 0;
+    const cls = kpiClass(key, v);
+    return `<div class="kpi"><div class="label">${label}</div><div class="value ${cls}">${fmtKpi(key, v)}</div></div>`;
+  }).join('');
+}
+
+function renderTradeLog(tbodyId, trades) {
+  const tbody = document.getElementById(tbodyId);
+  if (!trades.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty">No closed trades yet</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = trades.map(t => {
+    if (t.is_open) {
+      const sideCls = t.side === 'Buy' ? 'side-buy' : 'side-sell';
+      const pnlCls = t.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+      const pnlStr = t.pnl >= 0 ? `+$${t.pnl.toFixed(2)}` : `-$${Math.abs(t.pnl).toFixed(2)}`;
+      return `<tr style="background: rgba(91, 140, 255, 0.08);">
+        <td><strong>OPEN</strong> <span style="color:var(--muted);font-size:11px;">(entry ${t.entry_time})</span></td>
+        <td class="${sideCls}">${t.side.toUpperCase()}</td>
+        <td>${t.qty.toFixed(3)}</td>
+        <td>${t.entry.toLocaleString()}</td>
+        <td style="color:var(--muted);">SL ${t.current_sl.toLocaleString()}</td>
+        <td style="color:var(--muted);">—</td>
+        <td class="${pnlCls}">${pnlStr}</td>
+      </tr>`;
+    }
+    const points = (t.side === 'Buy' ? 1 : -1) * (t.exit - t.entry);
+    const pnlCls = t.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const sideCls = t.side === 'Buy' ? 'side-buy' : 'side-sell';
+    return `<tr>
+      <td>${t.exit_time}</td>
+      <td class="${sideCls}">${t.side.toUpperCase()}</td>
+      <td>${t.qty.toFixed(3)}</td>
+      <td>${t.entry.toLocaleString()}</td>
+      <td>${t.exit.toLocaleString()}</td>
+      <td class="${points >= 0 ? 'pnl-pos' : 'pnl-neg'}">${points.toFixed(1)}</td>
+      <td class="${pnlCls}">${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.target).classList.add('active');
+    });
+  });
+}
+
+async function refreshBacktest() {
+  const endpoint = btOneAtATime ? '/api/backtest/one_at_a_time' : '/api/backtest';
+  const res = await fetch(endpoint);
+  const d = await res.json();
+  document.getElementById('updated').textContent = d.updated;
+
+  if (d.tight) {
+    renderKpiCards('bt-kpis', d.tight.kpis);
+    btEquityChart.data.datasets[0].label = d.tight.label || 'Tight equity';
+    btEquityChart.data.datasets[0].borderColor = d.tight.color || ACCENT;
+    btEquityChart.data.datasets[0].data = toPoints(d.tight.equity);
+    btEquityChart.update('none');
+    btDrawdownChart.data.datasets[0].data = toPoints(d.tight.drawdown);
+    btDrawdownChart.data.datasets[1].data = toPoints(d.tight.static_drawdown);
+    btDrawdownChart.update('none');
+    renderTradeLog('bt-trade-log', d.tight.trades);
+  }
+}
+
+function setupBacktestToggle() {
+  const btn = document.getElementById('bt-one-at-a-time');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    btOneAtATime = !btOneAtATime;
+    btn.textContent = btOneAtATime ? 'Show: all setups' : 'Show: one trade at a time';
+    refreshBacktest();
+  });
+}
+
+async function refreshPaper() {
+  const res = await fetch('/api/paper');
+  const d = await res.json();
+  renderKpiCards('pt-kpis', d.kpis);
+  ptEquityChart.data.datasets[0].data = toPoints(d.equity);
+  ptEquityChart.update('none');
+  ptDrawdownChart.data.datasets[0].data = toPoints(d.drawdown);
+  ptDrawdownChart.data.datasets[1].data = toPoints(d.static_drawdown);
+  ptDrawdownChart.update('none');
+  renderTradeLog('pt-trade-log', d.trades);
+}
+
+async function refreshAll() {
+  try {
+    await refreshBacktest();
+    await refreshPaper();
+  } catch (err) {
+    console.error('Refresh error:', err);
+  }
+}
+
+function initCharts() {
+  btEquityChart = makeEquityChart('bt-equity-chart', [
+    { label: 'Tight equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
+  ], true);
+  btDrawdownChart = makeDrawdownChart('bt-drawdown-chart', [
+    { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
+    { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
+  ]);
+  ptEquityChart = makeEquityChart('pt-equity-chart', [
+    { label: 'Forward Test equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
+  ]);
+  ptDrawdownChart = makeDrawdownChart('pt-drawdown-chart', [
+    { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
+    { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
+  ]);
+}
+
+setupTabs();
+setupBacktestToggle();
+initCharts();
+refreshAll();
+setInterval(refreshAll, 15000);
+</script>
+</body>
+</html>

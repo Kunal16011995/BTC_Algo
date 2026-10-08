@@ -1,0 +1,43 @@
+# Secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Data / databases
+*.db
+*.db-journal
+*.csv
+*.parquet
+*.bi5
+*.zip
+*.json
+
+# Logs
+logs/
+
+# Project data folders
+data/
+Forward testing algo/data/
+
+# Backtest data / outputs / caches
+backtests/*/data/
+backtests/*/raw_cache/
+backtests/*/output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Images
+*.png
+*.jpg
+*.jpeg
