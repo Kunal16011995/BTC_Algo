@@ -16,7 +16,7 @@ echo "Health: http://0.0.0.0:5557/health"
 # Auto-restart loop
 while true; do
     echo "[+] Starting FVG paper bot at $(date -u +'%Y-%m-%d %H:%M:%S UTC') ..."
-    python -m src.fvg.bot
+    python3 -m src.fvg.bot
     exitcode=$?
 
     # Ctrl+C or clean exit -> stop the wrapper
