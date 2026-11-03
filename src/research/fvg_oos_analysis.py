@@ -16,9 +16,10 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
+from src.shared import config
 from src.fvg.backtest import compute_metrics, run_backtest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(config.PROJECT_ROOT))
 from src.shared import store
 
 HISTORY_DIR = Path(r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_m15_max\data")
@@ -151,7 +152,7 @@ def main():
                   f"ret={r['total_return_pct']:.1f}% sharpe={r['sharpe']:.2f}")
 
     # Save results
-    out_dir = Path(__file__).resolve().parent.parent / "data"
+    out_dir = config.PROJECT_ROOT / "data"
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / "fvg_oos_sensitivity_results.json"
     with open(out_path, "w") as f:

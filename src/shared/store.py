@@ -22,7 +22,7 @@ import pandas as pd
 
 from src.shared import config
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = config.PROJECT_ROOT
 DB_PATH = str(PROJECT_ROOT / 'data' / 'bot.db')
 _lock = threading.Lock()
 

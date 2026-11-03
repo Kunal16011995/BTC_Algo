@@ -57,7 +57,7 @@ def main():
 
     symbol = config.SYMBOL
     ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-    out_dir = str(Path(__file__).resolve().parent.parent / 'export')
+    out_dir = str(config.PROJECT_ROOT / 'export')
     os.makedirs(out_dir, exist_ok=True)
 
     # Parse requested date range

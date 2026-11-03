@@ -14,10 +14,11 @@ import numpy as np
 sys.path.insert(0, r"c:\Algos\NSE\WD GANN")
 from backtest_A3_green_red_weekly import load_or_fetch_data, compute_green_red
 from backtest_A3_sweep import run_backtest_variant
+from src.shared import config
 from src.shared import store
 
 WD_GANN_DIR = Path(r"c:/Algos/NSE/WD GANN")
-BTC_DIR = Path(__file__).resolve().parent.parent
+BTC_DIR = config.PROJECT_ROOT
 DATA_DIR = BTC_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 

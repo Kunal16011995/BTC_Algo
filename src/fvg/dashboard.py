@@ -22,7 +22,7 @@ from src.shared import store
 from src.shared.bybit_client import BybitClient
 
 APP_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = APP_DIR.parent.parent
+PROJECT_ROOT = config.PROJECT_ROOT
 DATA_DIR = PROJECT_ROOT / "data"
 
 # Trading capital is fixed at half the initial Bybit account; the other half remains untraded.

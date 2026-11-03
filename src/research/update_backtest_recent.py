@@ -13,7 +13,7 @@ from src.shared import store
 from src.fvg.backtest import compute_metrics, run_backtest
 from src.shared.bybit_client import BybitClient
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = config.PROJECT_ROOT
 DATA_DIR = BASE_DIR / "data"
 DATA_FILE = DATA_DIR / "fvg_backtest_tight.json"
 

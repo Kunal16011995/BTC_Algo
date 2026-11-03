@@ -80,7 +80,7 @@ def fetch_all_daily_klines(symbol='BTCUSDT', interval='D', sleep_seconds=0.5):
 
 def main():
     df = fetch_all_daily_klines(symbol='BTCUSDT', interval='D')
-    output_path = str(Path(__file__).resolve().parent.parent / 'data' / 'btc_daily_bybit.csv')
+    output_path = str(config.PROJECT_ROOT / 'data' / 'btc_daily_bybit.csv')
     df.to_csv(output_path, index=False)
     print(f'\nSaved {len(df)} daily candles to {output_path}')
     print(f'Date range: {df["timestamp"].min()} to {df["timestamp"].max()}')

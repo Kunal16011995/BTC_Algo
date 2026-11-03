@@ -64,7 +64,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(message)s",
     handlers=[
-        logging.FileHandler(Path(__file__).resolve().parent.parent / "logs" / "gann_forward_bot.log"),
+        logging.FileHandler(config.PROJECT_ROOT / "logs" / "gann_forward_bot.log"),
         logging.StreamHandler(),
     ],
 )

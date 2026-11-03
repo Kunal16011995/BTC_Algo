@@ -3,10 +3,13 @@ Bot configuration. All values can be overridden via .env.
 """
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # --- Bybit environment (FVG momentum bot) ---
 # Demo trading uses the dedicated demo host; public market data comes from the

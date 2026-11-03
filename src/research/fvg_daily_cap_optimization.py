@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
+from src.shared import config
 from src.fvg.backtest import compute_metrics, run_backtest
 
 HISTORY_DIR = Path(r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_m15_max\data")
@@ -107,7 +108,7 @@ def main():
                       f"ret={r['total_return_pct']:.1f}% sharpe={r['sharpe']:.2f} "
                       f"mdd={r['max_drawdown_pct']:.2f}%")
 
-    out_path = Path(__file__).resolve().parent.parent / "data" / "fvg_daily_cap_optimization.json"
+    out_path = config.PROJECT_ROOT / "data" / "fvg_daily_cap_optimization.json"
     with open(out_path, "w") as f:
         json.dump(rows, f, indent=2, default=str)
 

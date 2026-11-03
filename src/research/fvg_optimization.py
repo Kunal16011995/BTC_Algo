@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
+from src.shared import config
 from src.fvg.backtest import compute_metrics, run_backtest
 from src.fvg.strategy import Direction
 
@@ -133,7 +134,7 @@ def main():
                     rows.append(r)
 
     # Save
-    out_path = Path(__file__).resolve().parent.parent / "data" / "fvg_optimization_results.json"
+    out_path = config.PROJECT_ROOT / "data" / "fvg_optimization_results.json"
     with open(out_path, "w") as f:
         json.dump(rows, f, indent=2, default=str)
     print(f"\nSaved {len(rows)} results to {out_path}")

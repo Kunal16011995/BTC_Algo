@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
+from src.shared import config
 from src.fvg.backtest import compute_metrics, run_backtest
 
 HISTORY_DIR = Path(r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_m15_max\data")
@@ -231,7 +232,7 @@ def main():
         print(_format_report(report))
 
     # Save JSON
-    out_path = Path(__file__).resolve().parent.parent / "data" / "fvg_detailed_kpi_report.json"
+    out_path = config.PROJECT_ROOT / "data" / "fvg_detailed_kpi_report.json"
     with open(out_path, "w") as f:
         json.dump(reports, f, indent=2, default=str)
     print(f"\nSaved detailed report to {out_path}")

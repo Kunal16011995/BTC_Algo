@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from src.shared import config
+
 # ---------------------------------------------------------------------------
 # Strategy parameters
 # ---------------------------------------------------------------------------
@@ -52,7 +54,7 @@ def _get_base_notional(equity):
 # Load data
 # ---------------------------------------------------------------------------
 def load_data():
-    data_path = str(Path(__file__).resolve().parent.parent / 'data' / 'btc_daily_bybit.csv')
+    data_path = str(config.PROJECT_ROOT / 'data' / 'btc_daily_bybit.csv')
     df = pd.read_csv(data_path, parse_dates=['timestamp'])
     df = df.sort_values('timestamp').reset_index(drop=True)
     return df
@@ -484,7 +486,7 @@ def run_backtest(df, direction, plot=False, output_suffix='', use_ema200_filter=
         cagr = 0
         sharpe = 0
 
-    base_path = str(Path(__file__).resolve().parent.parent)
+    base_path = str(config.PROJECT_ROOT / 'data')
     suffix = output_suffix or f'_{direction}'
     trades_output = os.path.join(base_path, f'gann_overnight_paper_trades{suffix}.csv')
     equity_output = os.path.join(base_path, f'gann_overnight_paper_equity{suffix}.csv')
@@ -619,7 +621,7 @@ if __name__ == '__main__':
 
     # The default dashboard tab expects the unsuffixed 'both' files.
     # Rename the 'both' outputs to the canonical names if they were suffixed.
-    base_path = str(Path(__file__).resolve().parent.parent)
+    base_path = str(config.PROJECT_ROOT / 'data')
     for suffix in ('_both', '_long_only', '_short_only'):
         for prefix in ('gann_overnight_paper_trades', 'gann_overnight_paper_equity', 'gann_overnight_paper_backtest'):
             src = os.path.join(base_path, f'{prefix}{suffix}.csv' if 'trades' in prefix or 'equity' in prefix else f'{prefix}{suffix}.png')

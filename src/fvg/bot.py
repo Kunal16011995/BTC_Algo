@@ -87,7 +87,7 @@ _state = {
     "error_count": 0,
 }
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = config.PROJECT_ROOT
 LOG_PATH = BASE_DIR / "logs" / "fvg_paper_bot.log"
 
 # ---------------------------------------------------------------------------
