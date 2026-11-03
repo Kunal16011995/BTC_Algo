@@ -3,6 +3,13 @@ PROJECT CHANGE LOG - C:\Algos\Crypto\BTC
 Format: DATE - DESCRIPTION | STATUS
 =============================================================
 
+04/11/2026 - Removed WD Gann and A.3 framework from the project.
+             Deleted: src/gann/, src/research/generate_a3_dashboard_json.py,
+             scripts/start_gann_bot.bat, dashboard tabs/routes for WD Gann,
+             Gann forward test, and A.3 backtest.
+             Updated: README.md, docs/strategy_explainer.txt, scripts/run_all.bat.
+             STATUS: Project now contains only the FVG momentum strategy.
+
 14/10/2026 - Migrated W.D. Gann Strategy 1 backtest scripts from C:\Algos\NSE\WD GANN to C:\Algos\Crypto\BTC.
              Files moved/kept: gann_overnight_paper.py, gann_overnight_paper_equity.csv, gann_overnight_paper_trades.csv, btc_daily_bybit.csv.
              STATUS: WD Gann backtest now runs inside the BTC project folder. Operational.

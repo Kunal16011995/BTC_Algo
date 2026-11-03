@@ -1,9 +1,6 @@
 # BTC Algorithmic Trading Framework
 
-Systematic trading framework for BTCUSDT on Bybit, currently running two strategies:
-
-1. **FVG Momentum** (`src/fvg/`) — SSRN-6725880 A/A+ Fair Value Gap momentum strategy.
-2. **WD Gann Overnight** (`src/gann/`) — Green/Red weekly trend-line strategy.
+Systematic trading framework for BTCUSDT on Bybit, running the **FVG Momentum** strategy (`src/fvg/`) — SSRN-6725880 A/A+ Fair Value Gap momentum strategy.
 
 ## Repository layout
 
@@ -21,15 +18,10 @@ BTC_Algo/
 │   │   ├── backtest.py         backtest engine
 │   │   ├── compute_backtest.py regenerates dashboard backtest JSON
 │   │   └── templates/
-│   ├── gann/               <- WD Gann strategy
-│   │   ├── forward_bot.py
-│   │   ├── strategy.py
-│   │   └── backtest.py
 │   └── research/           <- diagnostics, optimisations, comparisons
 ├── scripts/                <- batch-file entry points
 │   ├── run_all.bat
 │   ├── start_fvg_bot.bat
-│   ├── start_gann_bot.bat
 │   ├── run_dashboard.bat
 │   └── run_fvg_forward_test.bat
 ├── docs/                   <- documentation and change log
@@ -61,7 +53,7 @@ BTC_Algo/
 
 All batch files set `PYTHONPATH` to the project root automatically, so run them from anywhere.
 
-### Run everything (dashboard + FVG bot + Gann bot)
+### Run everything (dashboard + FVG bot)
 
 ```bat
 scripts\run_all.bat
@@ -71,12 +63,6 @@ scripts\run_all.bat
 
 ```bat
 scripts\start_fvg_bot.bat
-```
-
-### Run only the WD Gann forward-test bot
-
-```bat
-scripts\start_gann_bot.bat
 ```
 
 ### Run only the dashboard
@@ -89,16 +75,15 @@ scripts\run_dashboard.bat
 
 ```bat
 python -m src.fvg.compute_backtest
-python -m src.research.generate_a3_dashboard_json
 ```
 
 ## What is "exact code" vs "helper code"
 
-- **Exact / production code**: everything under `src/`. These are the files that run live trades and the dashboard.
+- **Exact / production code**: everything under `src/fvg/` and `src/shared/`. These are the files that run live trades and the dashboard.
 - **Helper / research code**: everything under `src/research/`. These are diagnostics, optimisations, and one-off analyses. They import from `src/` but are not part of the live system.
 - **Entry points**: everything under `scripts/`.
 
 ## Notes
 
 - Sensitive files (`.env`, `bot.db`, `logs/`, `export/`, `data/`) are gitignored.
-- The FVG momentum bot and WD Gann bot trade BTCUSDT in one-way mode. They use separate Bybit demo accounts so they can run simultaneously.
+- The FVG momentum bot trades BTCUSDT in one-way mode on the Bybit demo account.

@@ -28,7 +28,6 @@ DATA_DIR = PROJECT_ROOT / "data"
 # Trading capital is fixed at half the initial Bybit account; the other half remains untraded.
 TRADING_CAPITAL = 92_453.04
 SYMBOL = "BTCUSDT"
-GANN_SYMBOL = "BTCUSDT"
 
 app = Flask(__name__)
 
@@ -50,11 +49,6 @@ client = BybitClient(
     config.BYBIT_DEMO_BASE_URL, config.BYBIT_PUBLIC_BASE_URL,
 )
 
-gann_client = BybitClient(
-    config.GANN_BYBIT_API_KEY, config.GANN_BYBIT_API_SECRET,
-    config.GANN_BYBIT_DEMO_BASE_URL, config.GANN_BYBIT_PUBLIC_BASE_URL,
-)
-
 
 def _get_account_split():
     """Return (total_equity, allocated_trading_capital)."""
@@ -71,14 +65,6 @@ def _get_account_split():
 
 def _load_backtest_json() -> dict | None:
     path = DATA_DIR / "fvg_backtest_tight.json"
-    if not path.exists():
-        return None
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def _load_a3_backtest_json() -> dict | None:
-    path = DATA_DIR / "a3_backtest.json"
     if not path.exists():
         return None
     with open(path, "r") as f:
@@ -351,35 +337,6 @@ def api_backtest_one_at_a_time():
     )
 
 
-@app.route("/api/a3_backtest")
-def api_a3_backtest():
-    """Return Gann A.3 Green/Red weekly long-only backtest results."""
-    data = _load_a3_backtest_json()
-    if data is None:
-        return jsonify({"error": "A.3 backtest data not found"}), 404
-
-    eq = data.get("equity", {"ts": [], "values": []})
-    capital = float(data.get("capital", 10000.0))
-    kpis = dict(data.get("kpis", {}))
-
-    return jsonify(
-        {
-            "a3": {
-                "label": "A.3 Green/Red Weekly (Long-only)",
-                "color": "#06b6d4",
-                "kpis": kpis,
-                "equity": eq,
-                "drawdown": _drawdown_from_equity(eq.get("ts", []), eq.get("values", [])),
-                "static_drawdown": _static_drawdown_from_equity(
-                    eq.get("ts", []), eq.get("values", []), capital
-                ),
-                "trades": [_format_trade(t) for t in data.get("trades", [])[-50:][::-1]],
-            },
-            "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        }
-    )
-
-
 @app.route("/api/paper")
 def api_paper():
     """Return live paper results for the tight variant (all + FVG-only views)."""
@@ -416,128 +373,6 @@ def api_paper():
         {
             "all": all_view,
             "fvg_only": fvg_view,
-            "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        }
-    )
-
-
-@app.route("/api/wd_gann")
-def api_wd_gann():
-    """Return fixed WD Gann overnight backtest results."""
-    equity_csv = DATA_DIR / "gann_overnight_paper_equity.csv"
-    trades_csv = DATA_DIR / "gann_overnight_paper_trades.csv"
-    if not equity_csv.exists() or not trades_csv.exists():
-        return jsonify({"error": "WD Gann data not found"}), 404
-
-    eq_df = pd.read_csv(equity_csv, parse_dates=["date"])
-    eq_df["ts"] = eq_df["date"].astype("int64") // 10**9
-    ts_list = eq_df["ts"].tolist()
-    values = eq_df["equity"].tolist()
-    equity_points = list(zip(ts_list, values))
-
-    trades_df = pd.read_csv(trades_csv, parse_dates=["entry_date", "exit_date"])
-    trades = []
-    for _, row in trades_df.iterrows():
-        trades.append(
-            {
-                "side": "Buy" if row["direction"] == "Long" else "Sell",
-                "qty": float(row["size_btc"]),
-                "entry_price": float(row["entry_price"]),
-                "exit_price": float(row["exit_price"]),
-                "pnl": float(row["pnl_usd"]),
-                "exit_ts": int(row["exit_date"].timestamp() * 1000),
-                "raw": {},
-            }
-        )
-
-    capital = 100_000.0
-    kpis = store.compute_kpis(trades, equity_points, capital)
-    kpis["total_account_equity"] = kpis["final_equity"]
-    kpis["allocated_capital"] = capital
-    kpis["return_on_total_equity"] = kpis["total_return"]
-
-    return jsonify(
-        {
-            "wd_gann": {
-                "label": "On_Fixed_WG_Backtest",
-                "color": "#a855f7",
-                "kpis": kpis,
-                "equity": {"ts": ts_list, "values": values},
-                "drawdown": _drawdown_from_equity(ts_list, values),
-                "static_drawdown": _static_drawdown_from_equity(ts_list, values, capital),
-                "trades": [_format_trade(t) for t in trades[-50:][::-1]],
-            },
-            "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-        }
-    )
-
-
-@app.route("/api/gann_forward")
-def api_gann_forward():
-    """Return live forward-test results for the Gann overnight variant (Bybit demo)."""
-    theoretical_allocated = 100_000.0
-    trades = store.load_trades_variant("gann_forward")
-    equity_points = store.load_equity_curve_variant("gann_forward")
-
-    # Use the actual Bybit balance if it is lower than the theoretical allocation.
-    try:
-        balance = gann_client.get_wallet_balance()
-        gann_equity = float(balance.get("totalEquity", 0) or 0)
-    except Exception as exc:
-        app.logger.warning("Could not fetch Bybit Gann equity: %s", exc)
-        gann_equity = 0.0
-
-    allocated = min(theoretical_allocated, gann_equity) if gann_equity > 0 else theoretical_allocated
-
-    if not equity_points:
-        equity_points = [[int(datetime.now(timezone.utc).timestamp()), allocated]]
-
-    kpis = store.compute_kpis(trades, equity_points, allocated)
-    kpis["allocated_capital"] = allocated
-    kpis["return_on_total_equity"] = kpis["total_return"]
-    kpis["total_account_equity"] = gann_equity if gann_equity > 0 else kpis["final_equity"]
-
-    ts_list = [p[0] for p in equity_points]
-    values = [p[1] for p in equity_points]
-
-    # Include an open live position row if one exists on Bybit (Gann account)
-    open_rows = []
-    try:
-        pos = gann_client.get_position(GANN_SYMBOL)
-        if pos and abs(float(pos.get("size", 0) or 0)) > 0:
-            side = pos.get("side", "")
-            entry_ts_ms = int(pos.get("createdTime", 0) or 0)
-            current_sl = float(pos.get("stopLoss", 0) or 0)
-            open_rows.append(
-                {
-                    "exit_time": "OPEN",
-                    "variant": "gann_forward",
-                    "side": side,
-                    "qty": abs(float(pos.get("size", 0) or 0)),
-                    "entry": float(pos.get("avgPrice", 0) or 0),
-                    "exit": current_sl,
-                    "pnl": float(pos.get("unrealisedPnl", 0) or 0),
-                    "is_open": True,
-                    "current_sl": current_sl,
-                    "entry_time": datetime.fromtimestamp(entry_ts_ms / 1000, tz=timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M"
-                    ) if entry_ts_ms else "—",
-                }
-            )
-    except Exception as exc:
-        app.logger.warning("Could not fetch Bybit Gann open position: %s", exc)
-
-    return jsonify(
-        {
-            "gann_forward": {
-                "label": "On Forward test",
-                "color": "#22c55e",
-                "kpis": kpis,
-                "equity": {"ts": ts_list, "values": values},
-                "drawdown": _drawdown_from_equity(ts_list, values),
-                "static_drawdown": _static_drawdown_from_equity(ts_list, values, allocated),
-                "trades": open_rows + [_format_trade(t) for t in trades[-50:][::-1]],
-            },
             "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         }
     )
