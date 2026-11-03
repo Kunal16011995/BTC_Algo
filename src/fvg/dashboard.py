@@ -10,6 +10,7 @@ Runs on port 5556.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -380,4 +381,6 @@ def api_paper():
 
 if __name__ == "__main__":
     store.init()
-    app.run(host="127.0.0.1", port=5556, threaded=True)
+    host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+    port = int(os.getenv("DASHBOARD_PORT", "5556"))
+    app.run(host=host, port=port, threaded=True)

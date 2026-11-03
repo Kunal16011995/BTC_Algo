@@ -1,0 +1,17 @@
+[Unit]
+Description=BTC FVG Momentum Paper Bot
+After=network.target
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{PROJECT_ROOT}}
+Environment=PYTHONPATH={{PROJECT_ROOT}}
+ExecStart={{PROJECT_ROOT}}/scripts/run_fvg_bot.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:{{PROJECT_ROOT}}/logs/fvg_bot.log
+StandardError=append:{{PROJECT_ROOT}}/logs/fvg_bot.log
+
+[Install]
+WantedBy=multi-user.target
