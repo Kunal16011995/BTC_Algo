@@ -1,0 +1,209 @@
+================================================================================
+TRADING SETUP EXPLAINER - C:\Algos\Crypto\BTC
+================================================================================
+
+This folder contains TWO separate trading systems that share the same
+Bybit API connection but do different things:
+
+1. FVG MOMENTUM BOT  -> live / paper forward testing on BTCUSDT
+2. WD GANN OVERNIGHT -> backtest-only dashboard tab
+
+Both trade BTCUSDT on Bybit. Both use the same demo/live API keys from the
+.env file. They are kept separate on purpose.
+
+Read this file if you are wondering:
+- "Why did a trade happen?"
+- "Why did NO trade happen?"
+- "What is the logic behind each system?"
+
+================================================================================
+1. FVG MOMENTUM BOT  (forward test / paper trading)
+================================================================================
+
+WHAT IT DOES
+------------
+It looks for short-term momentum bursts on the 15-minute BTCUSDT chart.
+When it sees a strong directional move, it waits for a small pullback gap
+(called a Fair Value Gap or FVG) and tries to enter in the direction of the
+momentum. It then rides the move with a tight stop and take-profit plan.
+
+WHICH FILES RUN IT
+------------------
+- strategy.py        -> finds setups and grades them
+- fvg_paper_bot.py   -> watches for new setups and sends orders to Bybit
+- config.py          -> settings (qty, stop %, TP %, API mode, etc.)
+- bybit_client.py    -> order execution wrapper around Bybit API
+- store.py           -> records signals and fills to a local SQLite DB
+
+HOW TO START IT
+---------------
+Double-click:  start_momentum_bot_only.bat
+This runs only the momentum bot (no dashboard).
+
+Or use:         run_fvg_forward_test.bat
+
+TIME FRAMES
+-----------
+- Main signal chart : M15 (15-minute candles)
+- Confirmation chart: H1  (1-hour candles for EMA/POC check)
+- Bot checks        : every time a new M15 candle closes
+
+ENTRY RULES (all must be true)
+------------------------------
+1. A "momentum leg" must exist:
+   - At least 2 candles in a row moving in the same direction
+   - Each candle's body must be >= 52% of its full range
+   - The last candle must break above/below a recent swing point
+
+2. After the leg, an FVG must form within the next 24 M15 candles:
+   - Bullish FVG: high of candle (i-2) < low of candle (i)
+   - Bearish FVG: low of candle (i-2) > high of candle (i)
+
+3. Entry price = the MIDPOINT of that FVG gap.
+
+4. Higher-timeframe confluence (H1):
+   - Entry price must be within 0.3% of one of these levels:
+     * EMA-20
+     * EMA-50
+     * 30-period Point of Control (POC) / volume node
+
+5. Session filter:
+   - Only trade during Asia, London, London-NY overlap, or New York windows.
+   - The bot skips setups that form outside these sessions.
+
+6. Grade:
+   - Grade A+ : body ratio >= 70% AND HTF aligned
+   - Grade A  : body ratio >= 52% AND HTF aligned
+
+EXIT RULES
+----------
+- Hard stop-loss: 0.4% below/above entry (tight stop)
+- TP1: 0.4% in profit. When TP1 hits, half position is closed.
+- After TP1, a manual trailing stop is started for the remaining "runner".
+- Runner hard TP: max 2% for Grade A, max 4% for Grade A+.
+- If stop-loss is hit before TP1, the whole position is closed.
+
+RISK / POSITION SIZING
+----------------------
+- Default start capital for the bot is set in config.py.
+- Quantity per trade is fixed in config.py (for example, 2 contracts of BTC).
+- No martingale. No pyramiding. One signal = one trade.
+
+WHY THE BOT SOMETIMES SITS IDLE
+--------------------------------
+If you see no trades, it is usually because one of the entry rules above
+was not met. Common reasons:
+
+[ ] No momentum leg formed on M15.
+[ ] A leg formed, but no FVG appeared within the next 24 candles.
+[ ] FVG formed, but the midpoint is too far from H1 EMA-20/EMA-50/POC.
+[ ] The setup formed outside the allowed trading session.
+[ ] The candle body ratio was below 52%.
+[ ] The bot only acts on the latest closed M15 candle. Older setups are
+    ignored even if they still look good on the chart.
+[ ] The bot was not running when the candle closed.
+[ ] API/demo mode is set to read-only, or keys are missing.
+
+The strategy is deliberately selective. In choppy or slow markets there
+can be long gaps with no trades. That is by design.
+
+================================================================================
+2. WD GANN OVERNIGHT STRATEGY  (backtest-only)
+================================================================================
+
+WHAT IT DOES
+------------
+This is a daily-timeframe trend-following strategy based on W.D. Gann rules.
+It enters in the direction of the weekly trend, uses a trailing stop, adds
+pyramid layers on big favorable moves, and reverses-and-doubles if stopped
+out when the weekly trend is still aligned.
+
+WHERE TO SEE IT
+---------------
+- Open the dashboard: run_dashboard.bat
+- Click the "On_Fixed_WD" tab.
+- It reads gann_overnight_paper_equity.csv and gann_overnight_paper_trades.csv.
+
+TIME FRAME
+----------
+- Daily candles on BTCUSDT.
+
+ENTRY RULES
+-----------
+1. Weekly trend is calculated first:
+   - Compare this week's close with the previous week's close.
+   - A move >= +1.0% = bullish weekly trend.
+   - A move <= -1.0% = bearish weekly trend.
+
+2. Daily reversal confirmation:
+   - Daily close must move >= 1.5% in the same direction as the weekly trend.
+
+3. Entry:
+   - At the daily close, enter long if weekly + daily are both bullish.
+   - At the daily close, enter short if weekly + daily are both bearish.
+   - No trade if weekly and daily do not agree.
+
+EXIT RULES
+----------
+- Trailing stop = 0.5% beyond the latest higher bottom (for longs) or the
+  latest lower top (for shorts).
+- Stop trails only in the favorable direction; it never widens.
+- On stop-out, if the weekly trend is still in the same direction, the
+  strategy reverses and doubles the position size.
+
+PYRAMIDING
+----------
+- Add one extra layer every 4% move in your favor.
+- Maximum 4 layers total.
+- Each new layer uses the same unit size as the original position.
+
+COSTS IN THE BACKTEST
+---------------------
+The backtest includes realistic Bybit execution costs:
+- Taker fee: 0.06% per side
+- Entry/exit slippage: 0.03% per side
+- Stop-market exit slippage: 0.05% per side
+
+CAPITAL AND LEVERAGE
+--------------------
+- Base account size assumed: $100,000
+- Position unit size is 75% of the base account ($75,000 notional per unit).
+- Max account leverage used: 1.5x.
+- The strategy is NOT running live. It is backtest-only inside the dashboard.
+
+================================================================================
+3. QUICK "WHY NO TRADES?" CHECKLIST
+================================================================================
+
+FOR THE MOMENTUM BOT
+--------------------
+1. Is start_momentum_bot_only.bat running?
+2. Is the .env file filled with valid Bybit API keys?
+3. Is config.py set to DEMO mode if you want paper trades?
+4. Did a new M15 candle close while the bot was running?
+5. Did the last closed candle pass all the rules above?
+6. Check the logs/ folder for the latest bot log. It prints why each setup
+   was accepted or rejected.
+
+FOR THE WD GANN TAB
+-------------------
+1. Is run_dashboard.bat running?
+2. Did you click the "On_Fixed_WD" tab?
+3. Do the CSV files gann_overnight_paper_equity.csv and
+   gann_overnight_paper_trades.csv exist?
+4. WD Gann does NOT place live trades. It only shows historical backtest results.
+
+================================================================================
+4. IMPORTANT SEPARATION
+================================================================================
+
+- Momentum bot can place live/paper trades on Bybit.
+- WD Gann is backtest-only and lives only in the dashboard.
+- start_momentum_bot_only.bat starts only the momentum bot.
+- run_dashboard.bat starts only the dashboard viewer.
+- They share the same project folder for convenience, but they do not share
+  strategy logic.
+
+================================================================================
+END OF EXPLAINER
+================================================================================

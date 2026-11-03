@@ -115,7 +115,7 @@ def main():
         print("Run fix_current_position.py instead to seed the open trade.")
         return
 
-    closed = client.get_closed_pnl(SYMBOL, limit=100)
+    closed = client.get_all_closed_pnl(SYMBOL)
     print(f"\n[{_now_str()}] Fetched {len(closed)} closed-PnL row(s)")
 
     # Load capital for the variant

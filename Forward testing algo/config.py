@@ -8,13 +8,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- Bybit environment ---
+# --- Bybit environment (FVG momentum bot) ---
 # Demo trading uses the dedicated demo host; public market data comes from the
 # standard public host (same prices, no auth needed).
 BYBIT_DEMO_BASE_URL = os.getenv('BYBIT_DEMO_BASE_URL', 'https://api-demo.bybit.com')
 BYBIT_PUBLIC_BASE_URL = os.getenv('BYBIT_PUBLIC_BASE_URL', 'https://api.bybit.com')
 BYBIT_API_KEY = os.getenv('BYBIT_API_KEY', '')
 BYBIT_API_SECRET = os.getenv('BYBIT_API_SECRET', '')
+
+# --- Bybit environment (WD Gann forward bot, separate account) ---
+GANN_BYBIT_DEMO_BASE_URL = os.getenv('GANN_BYBIT_DEMO_BASE_URL', 'https://api-demo.bybit.com')
+GANN_BYBIT_PUBLIC_BASE_URL = os.getenv('GANN_BYBIT_PUBLIC_BASE_URL', 'https://api.bybit.com')
+GANN_BYBIT_API_KEY = os.getenv('GANN_BYBIT_API_KEY', '')
+GANN_BYBIT_API_SECRET = os.getenv('GANN_BYBIT_API_SECRET', '')
 
 # --- Market ---
 SYMBOL = os.getenv('SYMBOL', 'BTCUSDT')          # USDT-margined linear perpetual

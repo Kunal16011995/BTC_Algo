@@ -28,21 +28,19 @@ from pathlib import Path
 
 import pandas as pd
 
-# Add the SSRN strategy engine to the path
-sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
-
 import config
 import store
 from bybit_client import BybitClient
-from strategy import Direction, generate_setups
+from strategy import Direction, generate_setups, diagnose_latest_bar
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 SYMBOL = "BTCUSDT"
 M15_INTERVAL = "15"
-M15_BARS = 500  # enough bars to derive H1 history by resampling
-H1_BARS = 100
+M15_BARS = 501  # fetch 501 so we can drop the forming bar and still keep 500 closed bars
+H1_INTERVAL = "60"
+H1_BARS = 1000  # fetch native H1 directly (do not resample M15) to match backtest HTF levels
 
 # Fixed trading capital for the single tight variant. The other half of the
 # Bybit account is left untraded as a buffer.
@@ -50,8 +48,8 @@ TRADING_CAPITAL = 92_453.04
 RISK_PER_TRADE = TRADING_CAPITAL * 0.005      # fixed $462.27 per trade
 DAILY_LOSS_CAP = RISK_PER_TRADE * 2.0          # $924.53 daily loss cap
 LEVERAGE = 2                                   # required so position size can exceed allocated cash
-ENTRY_FEE_PCT = 0.00055                       # taker entry (confirmed from Bybit executions)
-EXIT_FEE_PCT = 0.00055                        # taker exit (confirmed from Bybit executions)
+ENTRY_FEE_PCT = 0.0001                        # maker entry
+EXIT_FEE_PCT = 0.0006                         # taker exit
 
 VARIANTS = {
     "tight": {
@@ -195,21 +193,6 @@ def _klines_to_df(rows: list) -> pd.DataFrame:
 def _fetch_history(interval: str, limit: int) -> pd.DataFrame:
     rows = client.get_klines(SYMBOL, interval, limit=limit)
     return _klines_to_df(rows)
-
-
-def _resample_m15_to_h1(df5: pd.DataFrame, h1_bars: int = H1_BARS) -> pd.DataFrame:
-    """Derive H1 candles from M15 to avoid a second public klines request."""
-    df = df5.set_index("timestamp").copy()
-    h1 = df.resample("h").agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-        "turnover": "sum",
-    }).dropna().reset_index()
-    # Return the most recent h1_bars
-    return h1.tail(h1_bars).reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -512,61 +495,20 @@ def _infer_live_exit_reason(trade: dict, exit_price: float) -> str:
     return "manual/other"
 
 
-def _match_live_trade_loose(closed_row: dict, open_trades: list[dict]) -> dict | None:
-    """Loose matcher for manual closes where qty/entry may differ slightly."""
-    try:
-        close_side = closed_row.get("side", "")
-        qty = float(closed_row.get("qty", 0) or 0)
-        entry_price = float(closed_row.get("avgEntryPrice", 0) or 0)
-        updated_ms = int(closed_row.get("updatedTime", 0) or 0)
-    except Exception:
-        return None
-
-    best_match = None
-    best_score = float("inf")
-    for trade in open_trades:
-        if trade.get("side") == "Buy" and close_side != "Sell":
-            continue
-        if trade.get("side") == "Sell" and close_side != "Buy":
-            continue
-        if updated_ms < int(trade.get("entry_ts_ms", 0) or 0):
-            continue
-
-        trade_qty = float(trade.get("qty", 0) or 0)
-        trade_entry = float(trade.get("entry_price", 0) or 0)
-        if trade_qty <= 0 or qty <= 0:
-            continue
-        qty_diff_pct = abs(qty - trade_qty) / trade_qty
-        if qty_diff_pct > 0.10:
-            continue
-        price_diff_pct = abs(entry_price - trade_entry) / trade_entry if trade_entry > 0 else 0
-        if price_diff_pct > 0.05:
-            continue
-
-        score = qty_diff_pct + price_diff_pct
-        if score < best_score:
-            best_score = score
-            best_match = trade
-    return best_match
-
-
 def _sync_live_closed_pnl(open_live_trades: list[dict], capital: dict, daily_pnl: dict):
     """Poll Bybit closed-PnL and record any trades from our live positions."""
     if not open_live_trades:
         return
 
     try:
-        closed = client.get_closed_pnl(SYMBOL, limit=100)
+        closed = client.get_all_closed_pnl(SYMBOL)
     except Exception as exc:
         log.warning("Could not fetch closed PnL: %s", exc)
         return
 
     recorded = 0
     for row in closed:
-        # Try strict match first, then loose match for manual closes.
         trade = _match_live_trade(row, open_live_trades)
-        if trade is None:
-            trade = _match_live_trade_loose(row, open_live_trades)
         if trade is None:
             continue
 
@@ -800,10 +742,17 @@ def main():
     # Capital is fixed at the trading capital for the single tight variant.
     allocated_capital = _get_allocated_capital()
 
-    # Seed histories: fetch M15 only and derive H1 by resampling
+    # Seed histories: fetch M15 and native H1 separately so HTF levels match
+    # the backtest (which loads H1 directly from Bybit) rather than being
+    # approximated by resampling M15.
     m15 = _fetch_history(M15_INTERVAL, M15_BARS)
-    h1 = _resample_m15_to_h1(m15)
-    log.info("Seeded M15 history: %s bars, derived H1 history: %s bars", len(m15), len(h1))
+    h1 = _fetch_history(H1_INTERVAL, H1_BARS)
+    # Drop the currently forming bar on both timeframes; evaluate only closed bars.
+    if len(m15) > 1:
+        m15 = m15.iloc[:-1].copy().reset_index(drop=True)
+    if len(h1) > 1:
+        h1 = h1.iloc[:-1].copy().reset_index(drop=True)
+    log.info("Seeded M15 history: %s bars, H1 history: %s bars", len(m15), len(h1))
 
     # Per-variant capital and open trades
     # Restore capital from closed trades so restarts do not reset realized PnL.
@@ -829,33 +778,25 @@ def main():
                 bool(t.get("tp1_hit", False)),
                 float(t.get("current_sl", 0) or 0),
             )
-    else:
-        log.info("No open live trades loaded")
-
-    # Startup reconciliation: if a live position was manually closed while the
-    # bot was stopped, fetch closed-PnL and record any matched closes so the
-    # dashboard does not show stale open trades on restart.
-    if open_live_trades:
-        try:
-            pos = client.get_position(SYMBOL)
-            current_size = abs(float(pos.get("size", 0) or 0)) if pos else 0.0
-            if current_size == 0:
-                log.info(
-                    "Bybit is flat but %s open_live_trade(s) loaded; running startup reconciliation",
-                    len(open_live_trades),
-                )
-                _sync_live_closed_pnl(open_live_trades, capital, daily_pnl)
-                if open_live_trades:
+        # Try to record any trades that closed while the bot was down BEFORE
+        # clearing stale trackers, otherwise missed closed-PnL is lost forever.
+        _sync_live_closed_pnl(open_live_trades, capital, daily_pnl)
+        _save_open_live_trades(open_live_trades)
+        # Only clear unmatched trackers if Bybit confirms the position is flat.
+        if open_live_trades:
+            try:
+                pos = client.get_position(SYMBOL)
+                if pos and abs(float(pos.get("size", 0) or 0)) == 0:
                     log.warning(
-                        "Startup reconciliation could not match %s open_live_trade(s); "
-                        "they will remain tracked. Run reconcile_manual_close.py or "
-                        "record_manual_close.py if needed.",
+                        "Bybit reports no open position but %s live trade(s) were still tracked after sync; clearing stale tracker.",
                         len(open_live_trades),
                     )
-                else:
-                    log.info("Startup reconciliation complete; all loaded trades were closed")
-        except Exception as exc:
-            log.warning("Startup reconciliation failed: %s", exc)
+                    open_live_trades = []
+                    _save_open_live_trades(open_live_trades)
+            except Exception as exc:
+                log.warning("Could not verify live position at startup: %s", exc)
+    else:
+        log.info("No open live trades loaded")
 
     last_processed_ts: pd.Timestamp | None = None
 
@@ -874,17 +815,29 @@ def main():
 
     _state["running"] = True
 
-    # Sleep until the next 15-minute close (+ offset)
+    # Sleep until just after the next 15-minute bar boundary (+ offset).
+    # At that moment the previous M15 bar has just closed and is safe to process.
     sleep_s = _seconds_to_next_bar(15, 5)
-    log.info("Sleeping %.1f seconds until next M15 close", sleep_s)
+    log.info("Sleeping %.1f seconds until next M15 bar boundary", sleep_s)
     time.sleep(sleep_s)
 
     while True:
         try:
-            # Refresh histories: fetch M15 only and derive H1 by resampling.
-            # This cuts public klines API calls in half and reduces rate-limit risk.
+            # Refresh histories: fetch M15 and native H1 directly from Bybit.
+            # Native H1 ensures EMA-20/EMA-50/POC-30 levels match the backtest
+            # instead of being approximated by resampling M15.
             m15 = _fetch_history(M15_INTERVAL, M15_BARS)
-            h1 = _resample_m15_to_h1(m15)
+            h1 = _fetch_history(H1_INTERVAL, H1_BARS)
+            # Bybit returns the current forming bar as the last row.  We must
+            # evaluate setups only on the bar that has just closed; otherwise a
+            # setup can look valid on a few seconds of price action and then
+            # disappear once the full 15-minute bar completes.  This was the
+            # root cause of forward-test trades that the classifier could not
+            # reproduce later from completed bars.
+            if len(m15) > 1:
+                m15 = m15.iloc[:-1].copy().reset_index(drop=True)
+            if len(h1) > 1:
+                h1 = h1.iloc[:-1].copy().reset_index(drop=True)
 
             latest_ts = m15["timestamp"].iloc[-1]
 
@@ -1004,6 +957,32 @@ def main():
 
                     if new_setups:
                         log.info("%s: %s new setup(s) on %s", variant, new_setups, latest_ts)
+                    else:
+                        try:
+                            diag = diagnose_latest_bar(
+                                m15.copy(),
+                                h1.copy(),
+                                htf_proximity_pct=params.get("htf_proximity_pct", 0.002),
+                                a_body_threshold=COMMON_PARAMS.get("a_body_threshold", 0.52),
+                                a_plus_body_threshold=COMMON_PARAMS.get("a_plus_body_threshold", 0.70),
+                                fvg_lookforward=COMMON_PARAMS.get("fvg_lookforward", 8),
+                            )
+                            reasons = "; ".join(diag["reasons"]) if diag["reasons"] else "all criteria met but no actionable setup"
+                            log.info(
+                                "%s: no setup on %s | session=%s | fvg=%s | leg=%s | "
+                                "body_ratio=%s | htf=%s | reasons: %s",
+                                variant,
+                                latest_ts,
+                                diag["session"],
+                                diag["fvg_direction"] or "none",
+                                f"idx{diag['leg_end_idx']} br={diag['leg_min_body_ratio']:.2f}" if diag["leg_end_idx"] is not None else "none",
+                                f"{diag['leg_min_body_ratio']:.2f}" if diag["leg_min_body_ratio"] is not None else "n/a",
+                                "aligned" if diag["htf_aligned"] else "not_aligned",
+                                reasons,
+                            )
+                        except Exception as exc:
+                            log.warning("diagnose_latest_bar failed for %s: %s", variant, exc)
+                            log.info("%s: no setups on %s (strategy criteria not met)", variant, latest_ts)
 
                 last_processed_ts = latest_ts
                 _state["last_processed_ts"] = str(last_processed_ts)
@@ -1014,7 +993,7 @@ def main():
             _state["error_count"] += 1
             log.exception("Main loop error: %s", exc)
 
-        # Sleep until next 15-minute close
+        # Sleep until just after the next 15-minute bar boundary.
         time.sleep(_seconds_to_next_bar(15, 5))
 
 

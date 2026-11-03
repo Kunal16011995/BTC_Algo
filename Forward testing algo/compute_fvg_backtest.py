@@ -1,43 +1,38 @@
 """
 Pre-compute SSRN-6725880 FVG backtest results for the dashboard Backtest tab.
 
-Runs the single tight variant over the full BTCUSDT M15 history stored in
-`ssrn-6725880_btc_m15_max/data/` using the hybrid cost assumption
-(0.01% entry maker / 0.06% exit taker). Capital is fixed at the Bybit trading
-allocation ($92,453.04) and is no longer split.
+Fetches BTCUSDT M15 and H1 klines from Bybit, runs the tight variant using the
+same backtest engine as the GitHub repo, and writes:
 
-Outputs:
     data/fvg_backtest_tight.json
+
+Run with:
+    python compute_fvg_backtest.py
 """
 
 from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from dotenv import load_dotenv
 
-# Strategy engine path
-sys.path.insert(0, r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_fvg")
-
-from backtest import compute_metrics, run_backtest
-
-# Import local store for consistent KPI computation
+import config
 import store
+from backtest import compute_metrics, run_backtest
+from bybit_client import BybitClient
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-HISTORY_DIR = Path(r"C:\Dhan Algo\Systematic Trading Rules\backtests\ssrn-6725880_btc_m15_max\data")
 
 TRADING_CAPITAL = 92_453.04
-RISK_PER_TRADE_PCT = 0.005  # only used to derive fixed risk amount
-USE_FIXED_RISK = True  # True = fixed dollar risk per trade, False = % of current equity
-DAILY_LOSS_CAP_MULTIPLIER = 2.0  # daily cap = N x fixed risk per trade
+RISK_PER_TRADE_PCT = 0.005
+USE_FIXED_RISK = True
+DAILY_LOSS_CAP_MULTIPLIER = 2.0
 
 VARIANTS = {
     "tight": {
@@ -59,29 +54,22 @@ COMMON_PARAMS = {
 }
 
 
-def _load_parquet(symbol: str, minutes: int) -> pd.DataFrame:
-    path = HISTORY_DIR / f"{symbol}_{minutes}.parquet"
-    df = pd.read_parquet(path)
-    # Ensure lowercase columns and UTC timestamps
-    df.columns = [c.lower() for c in df.columns]
-    if df["timestamp"].dt.tz is None:
-        df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
-    else:
-        df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
+def _load_klines(client: BybitClient, symbol: str, interval: str,
+                 start_ms: int | None = None, end_ms: int | None = None) -> pd.DataFrame:
+    """Fetch klines from Bybit and return a sorted DataFrame."""
+    rows = client.get_all_klines(symbol, interval, start_ms=start_ms, end_ms=end_ms)
+    if not rows:
+        raise RuntimeError(f"No {interval} klines returned from Bybit")
+
+    df = pd.DataFrame(
+        rows,
+        columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"],
+    )
+    df["timestamp"] = pd.to_datetime(df["timestamp"].astype(float), unit="ms", utc=True)
+    for col in ["open", "high", "low", "close", "volume", "turnover"]:
+        df[col] = df[col].astype(float)
+    df = df.sort_values("timestamp").reset_index(drop=True)
     return df
-
-
-def _get_trading_capital() -> float:
-    """Return the fixed trading capital for the single tight variant.
-
-    Allow env TOTAL_EQUITY to override for offline testing, but the strategy
-    always trades one fixed allocation.
-    """
-    load_dotenv(BASE_DIR / ".env")
-    env_equity = os.getenv("TOTAL_EQUITY")
-    if env_equity:
-        return float(env_equity)
-    return TRADING_CAPITAL
 
 
 def _build_trade_dict(row: pd.Series, variant: str) -> dict:
@@ -112,12 +100,32 @@ def _build_trade_dict(row: pd.Series, variant: str) -> dict:
     }
 
 
-def _run_variant(variant: str, params: dict, df5: pd.DataFrame, df1h: pd.DataFrame, capital: float):
+def _run_variant(client: BybitClient, variant: str, params: dict, capital: float):
     print(f"Running backtest for variant: {variant} ...")
     t0 = time.time()
 
+    # Fetch as much history as Bybit allows. Start from 2020-03-25; earlier
+    # dates can cause Bybit public kline service errors.
+    start_ms = int(datetime(2020, 3, 25, tzinfo=timezone.utc).timestamp() * 1000)
+
+    df5 = _load_klines(client, "BTCUSDT", "15", start_ms=start_ms)
+    df1h = _load_klines(client, "BTCUSDT", "60", start_ms=start_ms)
+
+    # Drop the current forming bar so the backtest uses only completed bars,
+    # matching the corrected live bot and avoiding ephemeral end-of-window setups.
+    if len(df5) > 1:
+        df5 = df5.iloc[:-1].copy().reset_index(drop=True)
+    if len(df1h) > 1:
+        df1h = df1h.iloc[:-1].copy().reset_index(drop=True)
+
+    print(f"Loaded M15: {df5.shape}, from {df5['timestamp'].iloc[0]} to {df5['timestamp'].iloc[-1]}")
+    print(f"Loaded H1:  {df1h.shape}, from {df1h['timestamp'].iloc[0]} to {df1h['timestamp'].iloc[-1]}")
+
     fixed_risk_amount = capital * RISK_PER_TRADE_PCT if USE_FIXED_RISK else None
-    fixed_daily_loss_cap = fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else capital * 0.003
+    fixed_daily_loss_cap = (
+        fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else capital * 0.003
+    )
+
     result = run_backtest(
         df5,
         df1h,
@@ -126,8 +134,8 @@ def _run_variant(variant: str, params: dict, df5: pd.DataFrame, df1h: pd.DataFra
         fixed_risk_amount=fixed_risk_amount,
         daily_loss_cap_pct=None,
         fixed_daily_loss_cap=fixed_daily_loss_cap,
-        entry_cost_pct=0.00055,
-        exit_cost_pct=0.00055,
+        entry_cost_pct=0.0001,
+        exit_cost_pct=0.0006,
         **COMMON_PARAMS,
         **params,
     )
@@ -135,18 +143,14 @@ def _run_variant(variant: str, params: dict, df5: pd.DataFrame, df1h: pd.DataFra
     equity_df = result["equity"]
     trades_df = result["trades"]
 
-    # Convert equity curve to (ts_seconds, equity) points
     equity_points = [
         [int(ts.timestamp()), float(eq)]
         for ts, eq in zip(equity_df["timestamp"], equity_df["equity"])
     ]
 
-    # Convert trades to dashboard-compatible dicts
     trades = [_build_trade_dict(row, variant) for _, row in trades_df.iterrows()]
 
-    # Compute KPIs using the same function the dashboard uses
     kpis = store.compute_kpis(trades, equity_points, capital)
-    # Account basis equals trading basis for this virtual test
     kpis["total_account_equity"] = kpis["final_equity"]
     kpis["allocated_capital"] = capital
     kpis["return_on_total_equity"] = kpis["total_return"]
@@ -174,9 +178,11 @@ def _run_variant(variant: str, params: dict, df5: pd.DataFrame, df1h: pd.DataFra
         json.dump(payload, f, indent=2, default=str)
 
     elapsed = time.time() - t0
-    print(f"  -> {len(trades)} trades, final equity ${kpis['final_equity']:.2f}, "
-          f"Sharpe {kpis['sharpe_ratio']:.2f}, max DD {kpis['max_drawdown']:.2f}% "
-          f"({elapsed:.1f}s)")
+    print(
+        f"  -> {len(trades)} trades, final equity ${kpis['final_equity']:.2f}, "
+        f"Sharpe {kpis['sharpe_ratio']:.2f}, max DD {kpis['max_drawdown']:.2f}% "
+        f"({elapsed:.1f}s)"
+    )
     print(f"  -> saved {out_path}")
     return payload
 
@@ -185,15 +191,18 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     store.init()
 
-    capital = _get_trading_capital()
+    client = BybitClient(
+        config.BYBIT_API_KEY,
+        config.BYBIT_API_SECRET,
+        config.BYBIT_DEMO_BASE_URL,
+        config.BYBIT_PUBLIC_BASE_URL,
+    )
+
+    capital = TRADING_CAPITAL
     print(f"Trading capital for single tight variant: ${capital:,.2f}")
 
-    df5 = _load_parquet("BTCUSDT", 15)
-    df1h = _load_parquet("BTCUSDT", 60)
-    print(f"Loaded M15: {df5.shape}, H1: {df1h.shape}")
-
     for variant, params in VARIANTS.items():
-        _run_variant(variant, params, df5, df1h, capital)
+        _run_variant(client, variant, params, capital)
 
 
 if __name__ == "__main__":

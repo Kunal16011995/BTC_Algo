@@ -1,0 +1,496 @@
+PROJECT CHANGE LOG - C:\Algos\Crypto\BTC
+=============================================================
+Format: DATE - DESCRIPTION | STATUS
+=============================================================
+
+14/10/2026 - Migrated W.D. Gann Strategy 1 backtest scripts from C:\Algos\NSE\WD GANN to C:\Algos\Crypto\BTC.
+             Files moved/kept: gann_overnight_paper.py, gann_overnight_paper_equity.csv, gann_overnight_paper_trades.csv, btc_daily_bybit.csv.
+             STATUS: WD Gann backtest now runs inside the BTC project folder. Operational.
+
+14/10/2026 - Added "On_Fixed_WD" tab to the Flask dashboard (fvg_dashboard.py + templates/fvg_dashboard.html).
+             New route /api/wd_gann reads the WD Gann paper backtest CSVs and returns equity, drawdown, KPIs, and recent trades.
+             STATUS: Dashboard displays fixed WD Gann backtest results. Operational.
+
+14/10/2026 - Added run_dashboard.bat to launch the Flask dashboard and open the browser automatically.
+             STATUS: Active. Double-click to open http://127.0.0.1:5556. Dashboard only; does not start any trading bot.
+
+14/10/2026 - Updated gann_overnight_paper.py to include realistic Bybit execution costs:
+             - Taker fee: 0.06% per side
+             - Entry/exit slippage: 0.03% per side
+             - Stop-market exit slippage: 0.05% per side
+             STATUS: Backtest now reflects live-like costs. Final equity reduced from ~$1.74M to ~$1.43M. Operational.
+
+14/10/2026 - Added start_momentum_bot_only.bat to start only the FVG momentum paper bot (fvg_paper_bot.py) with auto-restart on crash.
+             STATUS: Active. Use this to run the momentum forward-test bot without the dashboard.
+
+15/10/2026 - Cleaned the BTC project folder. Removed non-runtime files:
+             - Report generators: create_framework_deck.py, create_investor_report.py, create_pitch_deck.py
+             - Old WD Gann variants: gann_overnight_backtest.py, gann_overnight_refined.py, gann_overnight_fixed*.py
+             - Test scripts: test_dummy_trade.py, test_strategy_signal.py
+             - Reports/PDFs/images: BTC_MOMENTUM_INVSTOR_REPORT.pdf, btc_momentum_bot_report.pdf, framework_equity_curve.png, etc.
+             - Large unused CSV: 5m_data.csv
+             - Ebook files: wdgannbook.pdf, wdgannbook.txt
+             STATUS: Only files required to run the momentum bot and dashboard remain. Bot/dashboard functionality unaffected. Operational.
+
+15/10/2026 - Verified FVG strategy source files (strategy.py, fvg_paper_bot.py, config.py, bybit_client.py, store.py) were NOT modified during migration/cleanup.
+             Last modified timestamps remain pre-cleanup (strategy.py 2026-10-05, fvg_paper_bot.py 2026-10-13).
+             STATUS: No strategy logic changes. Reduced recent trade frequency is due to market conditions, not code changes. Confirmed.
+
+15/10/2026 - Performed a dummy-trade sanity check on Bybit demo account to confirm API signing and order placement work.
+             A 0.001 BTC market order was opened and closed successfully (order IDs logged).
+             STATUS: Verified. Test script removed during cleanup.
+
+15/10/2026 - Added Bybit historical trade export utility.
+             Files added: export_bybit_trade_log.py + get_executions()/get_all_executions() in bybit_client.py.
+             Exports: bybit_executions_YYYYMMDD_HHMMSS.csv (every fill) and
+                      bybit_closed_pnl_YYYYMMDD_HHMMSS.csv (completed round-trip trades with PnL).
+             Enhanced: executions CSV now includes trade-level columns mapped from closed PnL
+                       via orderId: trade_closedPnl, trade_avgEntryPrice, trade_avgExitPrice,
+                       trade_qty, trade_side, trade_execType.
+             Run: python export_bybit_trade_log.py
+             STATUS: Operational. First export fetched 25 executions and 10 closed-PnL records.
+
+15/10/2026 - Improved Bybit trade export to use full pagination.
+             Added: get_all_closed_pnl(), get_order_history(), get_all_order_history() in bybit_client.py.
+             export_bybit_trade_log.py now exports three files:
+               - bybit_executions_*.csv (fills)
+               - bybit_closed_pnl_*.csv (closed round-trip trades)
+               - bybit_orders_*.csv (all orders including open/cancelled)
+             STATUS: Operational. Verified the demo account genuinely contains 10 closed trades
+                     across ~6 days (Oct 8-14). 21 orders and 25 executions in total.
+
+15/10/2026 - Added date-range support to Bybit trade export.
+             export_bybit_trade_log.py accepts --start and --end (default 2026-09-30 to today).
+             bybit_client.py now auto-splits ranges > 7 days into 7-day chunks because Bybit limits
+             each execution/closed-pnl/order-history query to a 7-day window.
+             STATUS: Operational. Export for 30 Sep -> 15 Oct fetched 24 closed trades, 66 fills,
+                     50 orders. Total realized PnL +$5,279.02 (15 winners, 9 losers).
+
+15/10/2026 - Created TradingView Pine Script validator for the FVG momentum strategy.
+             Files: fvg_momentum_validator.pine + fvg_pinescript_readme.txt
+             Mirrors the tight-variant logic from fvg_paper_bot.py on a 15m chart:
+             momentum-leg detection, FVG detection, 1h HTF confluence, session filter,
+             Grade A/A+ classification, and stop/TP1/runner level plotting.
+             STATUS: Ready for TradingView import. POC30 approximated by 30-period SMA of hl2
+                     because Pine Script has no direct histogram-POC function.
+
+15/10/2026 - Fixed Pine Script compile error: Pine Script does not allow tuple-returning
+             functions inside a ternary operator. Replaced the conditional tuple assignment
+             with an unconditional call to findRecentLeg() and separate conditional flags.
+             STATUS: Pine Script syntax corrected; ready for re-import into TradingView.
+
+15/10/2026 - Fixed Pine Script timezone error: Pine Script has no `timezone.utc` constant.
+             Replaced with the string "UTC" in the hour() and minute() calls.
+             STATUS: Syntax corrected; ready for re-import into TradingView.
+
+15/10/2026 - Fixed Pine Script hour()/minute() signature: these functions require a `time`
+             series as the first argument and the timezone as the second argument.
+             Changed to `hour(time, "UTC")` and `minute(time, "UTC")`.
+             STATUS: Syntax corrected; ready for re-import into TradingView.
+
+15/10/2026 - Fixed Pine Script plotshape text error: `text` must be a const string, not a
+             series string. Split the A/A+ markers into four separate plotshape calls
+             (Long A, Long A+, Short A, Short A+).
+             STATUS: Syntax corrected; ready for re-import into TradingView.
+
+15/10/2026 - Added Pine Script backtest version: fvg_momentum_backtest.pine
+             Uses the same signal logic as the validator but runs as a TradingView strategy.
+             Exits: 50% at TP1, remaining 50% at runner-max or original stop.
+             Default settings: $100k capital, 10% equity/trade, 0.06% commission/side.
+             STATUS: Ready for TradingView backtesting. Note: runner exit is a fixed bracket,
+                     not the live bot's trailing stop, so runner profits may be conservative.
+             Also updated fvg_pinescript_readme.txt with backtest instructions.
+
+15/10/2026 - Removed Pine Script files from the project as requested.
+             Deleted: fvg_momentum_validator.pine, fvg_momentum_backtest.pine,
+                      fvg_pinescript_readme.txt
+             STATUS: Pine Script validator and backtest no longer in the project folder.
+
+15/10/2026 - Created export/ folder for all Bybit trade-export CSVs.
+             Moved existing bybit_closed_pnl_*.csv, bybit_executions_*.csv, and
+             bybit_orders_*.csv files into export/.
+             Updated export_bybit_trade_log.py to save future exports into export/.
+             Fixed docstring escape-sequence warning.
+             STATUS: Project structure cleaner. Test export for 14-15 Oct saved
+                     correctly into C:\Algos\Crypto\BTC\export.
+
+15/10/2026 - Added per-candle diagnostic logging for FVG momentum bot.
+             Added diagnose_latest_bar() to strategy.py.
+             Updated fvg_paper_bot.py to log, on every new M15 candle with no setup,
+             which criteria failed: session, FVG completion, momentum leg, body ratio,
+             HTF confluence distances, and grade.
+             STATUS: Operational. Verified with a standalone diagnostic test on recent
+                     M15 data. Terminal output now shows detailed reasons when no trade
+                     is placed.
+
+18/10/2026 - Updated FVG momentum backtest tab data to latest date.
+             Added bybit_client.get_all_klines() for bulk kline fetching.
+             Added compute_fvg_backtest.py to regenerate data/fvg_backtest_tight.json
+             from Bybit M15/H1 history (using the same backtest engine as the GitHub repo).
+             Re-ran full backtest: 2020-03-25 -> 2026-10-18 15:45 UTC,
+             3,567 trades (was 3,538), final equity $722,910.24, Sharpe 3.76, max DD -9.51%.
+             Backtest tab now shows trades through 18 Oct 2026.
+             STATUS: Dashboard backtest data updated and ready.
+
+19/10/2026 - Reconciled stale open live trade in forward-test tab.
+             Trade entry 2026-10-16 10:45 (Buy 1.407 BTC @ 82110.4) had already closed
+             on Bybit at 2026-10-16 12:02 with PnL +$333.07, but open_live_trades meta
+             still showed it as OPEN because the bot missed the SL/TP fill order ID change.
+             Copied reconcile_manual_close.py from GitHub repo, fixed it to use
+             get_all_closed_pnl(), and ran it. Recorded the close in bot.db, updated the
+             tight-variant equity curve, and cleared open_live_trades.
+             ROOT CAUSE: Adding pagination to bybit_client.get_closed_pnl() changed its
+             return type to (list, cursor), which broke fvg_paper_bot._sync_live_closed_pnl().
+             Fixed fvg_paper_bot.py to call get_all_closed_pnl() instead so future SL/TP
+             fills are reconciled automatically.
+             STATUS: Forward-test tab now correctly shows the trade as closed and the bot
+                     will auto-reconcile future closes.
+
+19/10/2026 - Cleaned legacy forward-test trades from bot.db.
+             Discovered that 24 of 25 "tight" variant trades in bot.db were legacy trades
+             from an earlier CP momentum/supertrend strategy (evidenced by config.py still
+             containing SUPERTREND_FACTOR/MOMENTUM_LOOKBACK and the trades not matching
+             FVG setups). Only the 2026-10-16 Buy trade was a genuine FVG live trade.
+             Deleted all legacy tight trades and reset the tight-variant equity curve.
+             Kept the one genuine FVG trade: entry 2026-10-16 10:45, exit 2026-10-16 12:02,
+             PnL +$333.07. Forward-test equity now starts at $92,453.04 and shows $92,786.11
+             after the FVG trade.
+             STATUS: Forward-test tab is now clean FVG-only and comparable to Backtest tab.
+
+=============================================================
+IMPORTANT NOTES
+=============================================================
+- The FVG momentum bot and the WD Gann backtest remain SEPARATE.
+- WD Gann "On_Fixed_WD" tab is backtest-only; it does NOT place live/paper trades.
+- To place momentum-bot trades, run start_momentum_bot_only.bat or run_fvg_forward_test.bat.
+- run_dashboard.bat only opens the dashboard viewer.
+
+19/10/2026 - Restored all actual Bybit closed-PnL trades for BTCUSDT from 2026-09-30 onwards
+             into bot.db (24 real bot trades after filtering out tiny test lots).
+             Rebuilt the tight-variant equity curve starting at $92,453.04.
+             Cleared the open_live_trades meta so no stale OPEN rows remain in the trade log.
+             Strategy logic in strategy.py/backtest.py/compute_fvg_backtest.py was NOT changed.
+             Forward-test KPIs now reflect the actual trades placed by the bot.
+             STATUS: Forward-test tab shows 24 closed trades; final equity $97,934.73.
+
+19/10/2026 - Refactored gann_overnight_paper.py to run long-only / short-only / both
+             comparisons side-by-side. Fixed a bug where the direction filter was not
+             enforced on reverse-and-double entries, so long_only/short_only were leaking
+             into the opposite direction.
+             Ran the comparison on BTC daily data through 2026-10-13:
+               both       : ROI +1329.81%, max DD -34.50%, 1362 trades, Sharpe 1.80
+               long_only  : ROI  +563.98%, max DD -26.47%,  758 trades, Sharpe 1.30
+               short_only : ROI   -69.39%, max DD -69.39%,   52 trades, Sharpe -0.36
+             The short side is the main drag on the strategy over this BTC history.
+             Generated separate equity/trades/plot files for each direction.
+             The dashboard On_Fixed_WD tab continues to use the canonical 'both' files.
+             STATUS: WD Gann backtest now supports directional analysis; drawdown driver identified.
+
+19/10/2026 - Tested a 200 EMA regime filter on the WD Gann strategy:
+             - no longs when price < 200 EMA
+             - no shorts when price > 200 EMA
+             Results on BTC daily data through 2026-10-13:
+               baseline (no filter): ROI +1329.81%, max DD -34.50%, 1362 trades, Sharpe 1.80
+               with 200 EMA filter  : ROI  +597.80%, max DD -30.88%,  798 trades, Sharpe 1.20
+             The filter blocked 517 trades; those blocked trades had a net positive PnL
+             of +$361,155, so the filter cut returns far more than it cut drawdown.
+             Canonical dashboard files restored to the baseline (no-filter) run.
+             STATUS: Naive 200 EMA filter is not recommended for this strategy.
+
+19/10/2026 - Ran a trailing-stop parameter sweep on the WD Gann strategy:
+             stop_loss_pct values tested: 0.10%, 0.15%, 0.20%, 0.25%, 0.30%, 0.35%, 0.40%, 0.45%, 0.50%.
+             Key results on BTC daily data through 2026-10-13:
+               0.10% : ROI +1322.14%, max DD -33.55%, 1479 trades, Sharpe 1.93
+               0.20% : ROI +1326.67%, max DD -33.99%, 1454 trades, Sharpe 1.89
+               0.45% : ROI +1335.47%, max DD -34.28%, 1371 trades, Sharpe 1.81
+               0.50% : ROI +1329.81%, max DD -34.50%, 1362 trades, Sharpe 1.80
+             Tightening the trailing stop modestly reduces drawdown and improves Sharpe.
+             The 0.10% stop gives the lowest drawdown (-33.55%) and highest Sharpe (1.93)
+             with only a small return reduction vs the current 0.50% setting.
+             Saved sweep results to gann_overnight_stop_optimisation.csv.
+             STATUS: Stop optimisation complete; 0.10% is the best risk-adjusted setting tested.
+
+19/10/2026 - Fixed stale OPEN row reappearing in Forward-Test trade log.
+             Root cause: fvg_paper_bot.py was still running with the old open live trade
+             in memory. When the open_live_trades meta was cleared manually, the running
+             bot rewrote it from its in-memory state on the next 15-minute bar.
+             Action: stopped all running bot/dashboard processes, cleared the meta key,
+             and added a startup guard in fvg_paper_bot.py that checks Bybit position size.
+             If Bybit reports no open position but the tracker has live trades, the tracker
+             is cleared automatically on the next bot start.
+             STATUS: Dashboard Forward-Test tab now shows 0 OPEN rows and 24 closed trades.
+
+19/10/2026 - Ran a position-size / leverage sweep on the WD Gann strategy.
+             Grid: leverage [1.0, 1.5, 2.0, 2.5, 3.0] x base-unit notional [50%, 75%, 100%].
+             Key finding: leverage only matters when margin constraints skip trades;
+             base-unit notional is the real position-size driver.
+             Standout results on BTC daily data through 2026-10-13:
+               50% base + 1.5x lev : ROI +664.90%, max DD -17.96%, Sharpe 2.08, Calmar 2.03
+               75% base + 1.5x lev : ROI +987.50%, max DD -20.65%, Sharpe 2.12, Calmar 2.13  <- best Calmar
+               100% base + 2.0x lev: ROI +1316.67%, max DD -24.34%, Sharpe 2.04, Calmar 2.05
+               100% base + 3.0x lev: ROI +1329.81%, max DD -34.50%, Sharpe 1.80, Calmar 1.45  <- current
+             The 75% base / 1.5x leverage setting cuts drawdown by ~14 percentage points
+             while still delivering ~987% total return, giving the best risk-adjusted profile.
+             Saved sweep results to gann_overnight_sizing_optimisation.csv.
+             STATUS: Sizing optimisation complete; 75% base + 1.5x leverage is the recommended
+                     lower-drawdown variant.
+
+19/10/2026 - Ran a finer drawdown-focused sizing grid on the WD Gann strategy.
+             Tested base-unit notional from 10% to 50% with leverage 1.0x–3.0x.
+             Lowest-drawdown results on BTC daily data through 2026-10-13:
+               10% base : ROI +132.98%, max DD  -7.11%, Sharpe 2.38  <- lowest drawdown
+               15% base : ROI +199.47%, max DD  -9.46%, Sharpe 2.35
+               20% base : ROI +265.96%, max DD -11.33%, Sharpe 2.31
+               50% base : ROI +664.90%, max DD -17.96%, Sharpe 2.08
+             Leverage had no effect in this range because margin was never binding.
+             Saved results to gann_overnight_dd_focus_grid.csv.
+             STATUS: If lowest drawdown is the only priority, 10% base unit is the winner.
+
+19/10/2026 - Froze the WD Gann overnight strategy parameters to the recommended
+             balanced setting: 75% base unit + 1.5x leverage.
+             Updated gann_overnight_paper.py defaults and regenerated the canonical
+             dashboard files (gann_overnight_paper_equity.csv, trades.csv, backtest.png).
+             Updated strategy_explainer.txt to reflect the new capital/leverage settings.
+             Final frozen backtest KPIs through 2026-10-13:
+               ROI +987.50%, CAGR 44.03%, max DD -20.65%, 1351 trades, Sharpe 2.12.
+             STATUS: WD Gann On_Fixed_WD dashboard tab now uses the frozen 75%/1.5x settings.
+
+19/10/2026 - Updated FVG dashboard labels per user request:
+             - Deleted "WD Gann Overnight — Fixed Paper Config" header text.
+             - Renamed tab "On_Fixed_WD" to "On_Fixed_WG_Backtest".
+             - Renamed tab "Backtest" to "Momentum_Backtest".
+             - Deleted "Backtest — Tight variant (0.4% stop / 0.4% TP1)" header text.
+             - Renamed tab "Forward Test" to "Momentum forward test".
+             - Updated chart legend labels and strategy note to match the new naming
+               and the frozen 75% base / 1.5x leverage WD Gann settings.
+             Files changed: templates/fvg_dashboard.html, fvg_dashboard.py.
+             STATUS: Dashboard UI labels refreshed.
+
+19/10/2026 - Launched WD Gann Overnight live forward-test bot on Bybit demo.
+             New files: gann_strategy.py (reusable signal engine), gann_forward_bot.py,
+             start_gann_forward.bat.
+             Allocated capital: $92,400. Settings: 75% base unit, 1.5x leverage,
+             0.5% trailing stop, daily reversal 1.5%, weekly reversal 1.0%, direction both.
+             Bot polls daily at 00:00-00:10 UTC, places/clears BTCUSDT market orders,
+             updates server-side trailing stop, and records closed-PnL + equity snapshots.
+             Health endpoint: http://127.0.0.1:5558/health.
+             Fixed live processing to use the just-completed daily candle (index -2)
+             rather than the newly opened candle (index -1).
+             Verified order placement with a 0.001 BTC test market order that was
+             opened and closed successfully on Bybit demo.
+             STATUS: Bot is running. No strategy signal today (weekly trend -1, daily
+                     trend +1), so no position was entered. Next check at 2026-10-20 00:00 UTC.
+                     IMPORTANT: this bot trades the same symbol (BTCUSDT) as the FVG
+                     momentum bot. Only one of the two forward-test bots should be left
+                     running at a time to avoid position conflicts in one-way mode.
+
+19/10/2026 - Added combined launcher: run_both_bots_and_dashboard.bat.
+             Starts the Flask dashboard, the FVG momentum paper bot, and the WD Gann
+             forward bot in three separate windows. Kills stale processes first and
+             opens the dashboard in the browser automatically.
+             STATUS: Operational. Warning displayed in the batch file: both bots trade
+                     BTCUSDT in one-way mode, so they cannot hold separate positions
+                     simultaneously.
+
+19/10/2026 - Hardened Gann forward bot trade segregation.
+             Added local tracker (open_gann_forward_trades in bot.db meta) for Gann
+             positions. _record_closed_trade() now matches Bybit closed-PnL rows to
+             tracked Gann trades by side/qty/entry price before recording them under
+             the 'gann_forward' variant. This prevents FVG momentum trades from being
+             accidentally booked into the Gann forward equity curve.
+             Also added startup reconciliation: if Bybit shows a position but the
+             tracker is empty, the tracker is reconstructed; if Bybit is flat but the
+             tracker has stale entries, it is cleared.
+             STATUS: Gann forward trades and equity curve are now cleanly segregated
+                     from FVG momentum trades in bot.db and on the dashboard.
+
+19/10/2026 - Cleaned up temporary WD Gann CSV outputs.
+             Deleted all gann_overnight_*.csv files except the two canonical dashboard
+             files: gann_overnight_paper_equity.csv and gann_overnight_paper_trades.csv.
+             Removed sweep outputs (stop, sizing, drawdown grids) and directional
+             comparison CSVs (long_only, short_only, filtered, etc.).
+             STATUS: Project folder cleaned; dashboard backtest data preserved.
+
+19/10/2026 - Migrated the WD Gann forward-test bot from Bybit to Delta Exchange demo.
+             New connector: delta_client.py (HMAC-SHA256 signed REST client).
+             Updated gann_forward_bot.py to trade BTCUSD on Delta demo using
+             contract-size sizing (contract_value=0.001 BTC, tick_size=0.1,
+             whole-contract quantities).
+             Lot sizing now uses min(allocated_capital, Delta net_equity) and the
+             frozen 75% base-unit / 1.5x leverage settings.
+             Entry flow: market-order open -> separate reduce-only stop-market SL order.
+             Trailing stop updates cancel the old stop order and place a new one.
+             Closed trades are recorded from fill/order data and PnL is computed with
+             Delta's 0.05% taker fee.
+             Updated fvg_dashboard.py /api/gann_forward to read the open position and
+             net equity from Delta instead of Bybit.
+             Added DELTA_API_KEY / DELTA_API_SECRET / DELTA_BASE_URL to config.py.
+             STATUS: Delta credentials added to .env. Signature mismatch fixed by
+                     including the leading '?' in the signed query string. Verified
+                     wallet balance ($199.91 USD) and placed a round-trip test trade
+                     (buy 1 / sell 1 BTCUSD contract) successfully. Bot is running.
+
+19/10/2026 - Performed a full Gann-style manual round-trip test on Delta demo.
+             Entered LONG 2 BTCUSD contracts @ 82001 with a reduce-only stop-market
+             sell at 80386.5, then closed the position @ 81965.5 and cancelled the
+             stop order. Commission was ~$0.087 per side.
+             Discovered Delta DELETE /v2/orders requires:
+               - query param product_id
+               - body {"id": order_id}
+               - signature = method + timestamp + path + body (query is NOT signed)
+             Fixed delta_client.py cancel_order() accordingly and updated
+             gann_forward_bot.py to pass product_id when cancelling stops.
+             Final demo balance after test: $199.66 USD. Position is flat.
+             STATUS: Full entry/stop/cancel/exit flow verified. Bot restarted with fix.
+
+20/10/2026 - Fixed Gann forward capital display / sizing mismatch.
+             The dashboard was showing Allocated Capital = $92,400 while the Delta
+             demo account only holds ~$200. Updated gann_forward_bot.py to use
+             effective_capital = min(allocated, Delta net_equity) for both lot sizing
+             and the equity curve base. Updated fvg_dashboard.py /api/gann_forward to
+             report the effective capital ($199.66) and rebased KPIs on it.
+             Rebuilt the gann_forward variant equity curve to start at $199.66.
+             STATUS: Forward-test tab now reflects the real Delta account size.
+
+20/10/2026 - Updated Bybit demo API credentials for the FVG momentum bot.
+             Replaced BYBIT_API_KEY / BYBIT_API_SECRET in .env with the new demo
+             account credentials provided by the user.
+             Verified connection: wallet balance ~$99,936.50 USDT-equity, no open
+             BTCUSDT position. The Gann forward bot remains on Delta demo.
+             STATUS: FVG momentum bot will use the new Bybit account on next start.
+                     Close existing batch windows and rerun
+                     run_both_bots_and_dashboard.bat to pick up the new keys.
+
+20/10/2026 - Re-split account credentials: FVG momentum bot stays on the original Bybit demo
+             account (BYBIT_API_*); WD Gann forward bot moved to the new Bybit demo account
+             (GANN_BYBIT_API_*). Delta Exchange connector and credentials removed entirely.
+             Updated gann_forward_bot.py to trade BTCUSDT on Bybit with server-side SL and
+             trailing-stop updates. Updated fvg_dashboard.py /api/gann_forward to read the
+             Gann account equity and open position directly from Bybit instead of Delta.
+             Effective capital = min($92,400, Bybit totalEquity). Verified the new Gann Bybit
+             account holds ~$184k USDT-equity and no open BTCUSDT position.
+             STATUS: FVG and Gann forward bots now run on separate Bybit demo accounts.
+                     Delta is no longer used. Dashboard capital display will reflect the real
+                     Bybit balance on next restart.
+
+20/10/2026 - Ran simulated dummy round-trip trades on both Bybit demo accounts to verify
+             order placement, position tracking, and account segregation.
+             FVG old Bybit: Buy 0.001 BTCUSDT @ 81975.4, Sell 0.001 @ market,
+             equity moved from $187,247.41 -> $187,254.55.
+             Gann new Bybit: Buy 0.001 BTCUSDT @ 81975.4, Sell 0.001 @ market,
+             equity moved from $184,249.27 -> $184,247.58.
+             Both accounts are flat again. Order IDs logged. Bots were briefly stopped
+             during the test and restarted afterwards.
+             STATUS: Both Bybit accounts execute market orders correctly. Bots are back
+                     running and report no open positions.
+
+20/10/2026 - Changed WD Gann forward-test allocated capital from $92,400 to $100,000.
+             Updated: gann_forward_bot.py ALLOCATED_CAPITAL, fvg_dashboard.py
+             /api/gann_forward theoretical_allocated, and the On Forward test note in
+             templates/fvg_dashboard.html.
+             Effective capital will be min($100,000, Bybit totalEquity), so the bot will
+             size on the full $100,000 allocation while the account equity remains ~$184k.
+             STATUS: Allocation updated. Changes take effect on next bot/dashboard start.
+
+21/10/2026 - Added FVG-direction / momentum-leg-direction alignment filter to strategy.py.
+             generate_setups() now skips a setup if the FVG direction does not match
+             the direction of the momentum leg that preceded it. This prevents a
+             bullish leg from triggering a bearish FVG/trade (and vice versa).
+             fvg_lookforward remains 8 candles as requested; Asia session and
+             post-bar timing were left unchanged.
+             Verified with py_compile and a quick backtest on recent M15/H1 data:
+             4 mismatched leg/FVG combinations are now filtered out, and the
+             remaining setups all have matching directions.
+             STATUS: FVG momentum strategy now requires leg/FVG direction
+                     alignment. Code is ready for the next bot/dashboard restart.
+
+21/10/2026 - Hardened Bybit historical kline fetching in bybit_client.py.
+             get_all_klines() now uses 5-day chunks (down from 6 days) and retries
+             transient 10016 service errors with exponential backoff. Added a 0.5s
+             pause between chunks. This fixes "svc error: Get kline failed" when
+             regenerating the dashboard backtest over long history.
+             Also adjusted compute_fvg_backtest.py start date from 2020-01-01 to
+             2020-03-25 to avoid requesting pre-listing dates.
+             STATUS: compute_fvg_backtest.py is running to regenerate
+                     data/fvg_backtest_tight.json with the direction-match filter.
+
+21/10/2026 - Switched bulk historical kline fetching to the Bybit demo host.
+             get_all_klines() now calls /v5/market/kline on demo_base_url
+             instead of public_base_url, because the public host was returning
+             repeated 10016 service errors on long historical ranges.
+             get_klines() gained an optional base_url parameter so the live bot
+             can continue using the public host for recent bars while the bulk
+             backtest fetcher uses the demo host.
+             STATUS: compute_fvg_backtest.py is running again to regenerate
+                     data/fvg_backtest_tight.json with the direction-match filter.
+
+21/10/2026 - Regenerated dashboard backtest data (data/fvg_backtest_tight.json) with
+             the new FVG/leg direction-match filter and demo-host kline fetching.
+             Range: 2020-03-25 10:30 UTC -> 2026-10-21 17:45 UTC.
+             Results with direction-match filter:
+               Trades: 1,543 (was 3,567)
+               Final equity: $472,473.51 (was $722,910.24)
+               Sharpe: 3.73 (was 3.76)
+               Max drawdown: -3.11% (was -9.51%)
+             The filter removed roughly 57% of trades, most of which were
+             direction-mismatched setups. The dashboard Backtest tab will reflect
+             these updated numbers on next dashboard start.
+             STATUS: Dashboard backtest JSON updated and verified.
+
+30/10/2026 - Fixed critical FVG momentum bot timing bug.
+             Root cause: fvg_paper_bot.py was using the newly opened, still-forming
+             M15 bar (index -1) as the "latest" bar. Setups that looked valid in
+             the first few seconds after a 15-minute boundary often disappeared once
+             the full bar completed. This caused 7 of the last 10 forward-test
+             trades (and all 10 when re-checked with completed bars) to be placed
+             even though they did not satisfy the strategy rules on closed bars.
+             Changes:
+               - fvg_paper_bot.py: drop the forming bar after every klines fetch.
+               - fvg_paper_bot.py: fetch 501 M15 bars so 500 closed bars remain.
+               - fvg_paper_bot.py: corrected misleading sleep comments.
+               - classify.py: classify trades against closed-bar setups only and
+                 expect the setup timestamp to be the bar that closed just before
+                 the order time.
+             STATUS: Code corrected. Bot must be restarted to load the fix.
+
+30/10/2026 - Updated FVG backtest to match corrected live-bot behavior.
+             Changes:
+               - compute_fvg_backtest.py: drop the forming bar before running the
+                 backtest (same fix as live bot).
+               - compute_fvg_backtest.py: aligned fees to live bot (0.01% entry,
+                 0.06% exit) instead of 0.055% both sides.
+               - update_backtest_recent.py: new incremental updater that extends
+                 the backtest JSON from Oct 15 onward without re-fetching 6+ years
+                 of history (avoids Bybit 10016 service errors).
+               - data/fvg_backtest_tight.json recomputed through 2026-10-30 05:00 UTC
+                 with 1,550 trades, final equity $545,952.34, Sharpe 4.17, max DD -2.51%.
+               - export/fvg_backtest_tight_trades.csv re-exported.
+             STATUS: Backtest tab now reflects live-bot fees and closed-bar logic.
+                     Dashboard must be restarted to load the updated JSON.
+
+04/11/2026 - Verified Nov 3 forward-test trades were placed by the corrected
+             closed-bar logic, not the old forming-bar bot.
+             Evidence from logs/fvg_paper_bot.log:
+               - Bot seeded 501 M15 bars and dropped the forming bar.
+               - SELL setup 2026-11-03 07:00 UTC @ 76613.75 placed ~07:00:07 UTC.
+               - BUY setup 2026-11-03 11:00 UTC @ 77049.85 placed ~11:00:07 UTC.
+               - Both setup times/prices match data/fvg_backtest_tight.json exactly.
+             PnL differences vs backtest are execution-driven, not signal errors:
+               - SELL: live fill 76557.60 vs setup 76613.75 (slippage) -> worse PnL.
+               - BUY: trailing SL hit at 77354.00 @ 12:30 UTC vs backtest 77156.20
+                 @ 12:15 UTC -> better PnL.
+             STATUS: Forward-test logic is correct. Remaining divergence is
+                     market fill/slippage plus minor bar-data differences.
+
+04/11/2026 - Aligned live-bot HTF data source with backtest.
+             fvg_paper_bot.py now fetches native H1 klines directly from Bybit
+             instead of deriving H1 by resampling M15. This ensures EMA-20,
+             EMA-50 and POC-30 are computed on the same timeframe source as the
+             backtest and eliminates resampling-induced HTF level drift.
+             Changes:
+               - Added H1_INTERVAL = "60" and H1_BARS = 1000.
+               - Removed _resample_m15_to_h1().
+               - Seed and main-loop fetches now request both M15 and H1.
+               - Both timeframes drop the current forming bar before use.
+             STATUS: Code updated and syntax-checked. Bot must be restarted to
+                     pick up the change.

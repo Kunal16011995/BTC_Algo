@@ -105,6 +105,15 @@ class BybitClient:
                     continue
                 raise RuntimeError(f'Bybit {method} {path} still rate limited after '
                                    f'{self.max_rate_limit_retries} retries')
+            if data.get('retCode') == 10002:  # timestamp/recv_window drift: resync and retry once
+                if attempt < self.max_rate_limit_retries:
+                    log.warning('%s %s timestamp drift (10002), resyncing server time (attempt %d/%d)',
+                                method, path, attempt, self.max_rate_limit_retries)
+                    self._time_offset_ms = self._sync_server_time()
+                    time.sleep(0.5)
+                    continue
+                raise RuntimeError(f"Bybit {method} {path} timestamp drift after "
+                                   f"{self.max_rate_limit_retries} retries: {data.get('retMsg')}")
             if data.get('retCode') != 0:
                 raise RuntimeError(f"Bybit {method} {path} error {data.get('retCode')}: {data.get('retMsg')}")
             return data
@@ -113,15 +122,71 @@ class BybitClient:
     # ------------------------------------------------------------------
     # Public market data (no auth)
     # ------------------------------------------------------------------
-    def get_klines(self, symbol, interval, limit=200, start_ms=None, end_ms=None):
+    def get_klines(self, symbol, interval, limit=200, start_ms=None, end_ms=None, base_url=None):
         """Return raw kline rows (newest first): [openTime, O, H, L, C, volume, turnover]."""
         params = {'category': 'linear', 'symbol': symbol, 'interval': str(interval), 'limit': limit}
         if start_ms:
             params['start'] = str(start_ms)
         if end_ms:
             params['end'] = str(end_ms)
-        data = self._request('GET', '/v5/market/kline', self.public_base_url, params=params, auth=False)
+        base_url = base_url or self.public_base_url
+        data = self._request('GET', '/v5/market/kline', base_url, params=params, auth=False)
         return data['result']['list']
+
+    def get_all_klines(self, symbol, interval, start_ms=None, end_ms=None):
+        """Fetch every available kline row for a symbol/interval.
+
+        Bybit limits each /v5/market/kline request to 1000 rows and a 7-day
+        time range, so this helper paginates in chunks and returns a single
+        list ordered newest-first (Bybit's native order).
+        """
+        all_rows = []
+        page = 0
+        # If no explicit range, fetch as far back as Bybit allows and up to now.
+        if end_ms is None:
+            end_ms = int(time.time() * 1000)
+        # Use 5-day chunks to stay safely inside Bybit's 7-day limit and reduce
+        # the chance of transient 10016 service errors on long historical ranges.
+        chunk_ms = 5 * 24 * 60 * 60 * 1000
+        chunk_end = end_ms
+        while True:
+            chunk_start = max(start_ms or 0, chunk_end - chunk_ms)
+            page += 1
+
+            # Retry transient kline service errors with exponential backoff.
+            rows = None
+            delay = 1.0
+            for attempt in range(1, 6):
+                try:
+                    # Use the demo host for bulk historical klines; it is more
+                    # tolerant of long date-range queries than the public host.
+                    rows = self.get_klines(
+                        symbol, interval, limit=1000,
+                        start_ms=chunk_start, end_ms=chunk_end,
+                        base_url=self.demo_base_url,
+                    )
+                    break
+                except RuntimeError as exc:
+                    if '10016' in str(exc) and attempt < 5:
+                        log.warning('Kline service error on page %d (attempt %d/5), retrying in %.0fs: %s',
+                                    page, attempt, delay, exc)
+                        time.sleep(delay)
+                        delay *= 2
+                        continue
+                    raise
+
+            if rows:
+                all_rows.extend(rows)
+                log.info('Fetched %d %s kline rows (page %d)', len(all_rows), interval, page)
+            if start_ms is not None and chunk_start <= start_ms:
+                break
+            if not rows and chunk_start <= start_ms:
+                break
+            if chunk_start <= 0:
+                break
+            chunk_end = chunk_start - 1
+            time.sleep(0.5)  # be polite to public endpoint
+        return all_rows
 
     def get_instrument(self, symbol):
         params = {'category': 'linear', 'symbol': symbol}
@@ -230,10 +295,130 @@ class BybitClient:
         )
         return float(data['result']['list'][0]['lastPrice'])
 
-    def get_closed_pnl(self, symbol, limit=100):
-        """Return closed-PnL records (entry/exit prices, realized PnL per closed trade)."""
+    @staticmethod
+    def _chunk_time_range(start_ms, end_ms, max_span_ms=7 * 24 * 60 * 60 * 1000):
+        """Split [start_ms, end_ms] into chunks no wider than max_span_ms."""
+        if start_ms is None or end_ms is None:
+            return [(start_ms, end_ms)]
+        chunks = []
+        chunk_start = start_ms
+        while chunk_start < end_ms:
+            chunk_end = min(chunk_start + max_span_ms, end_ms)
+            chunks.append((chunk_start, chunk_end))
+            chunk_start = chunk_end
+        return chunks
+
+    def get_closed_pnl(self, symbol, limit=100, cursor=None, start_ms=None, end_ms=None):
+        """Return one page of closed-PnL records (entry/exit prices, realized PnL per closed trade)."""
+        params = {'category': 'linear', 'symbol': symbol, 'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        if start_ms:
+            params['startTime'] = str(start_ms)
+        if end_ms:
+            params['endTime'] = str(end_ms)
         data = self._request(
             'GET', '/v5/position/closed-pnl', self.demo_base_url,
-            params={'category': 'linear', 'symbol': symbol, 'limit': limit},
+            params=params,
         )
-        return data['result']['list']
+        return data['result']['list'], data['result'].get('nextPageCursor')
+
+    def get_all_closed_pnl(self, symbol, start_ms=None, end_ms=None):
+        """Fetch every closed-PnL record for symbol and return as a list.
+
+        Automatically splits requests wider than 7 days to comply with Bybit's
+        maximum time-range limit.
+        """
+        all_pnl = []
+        for chunk_start, chunk_end in self._chunk_time_range(start_ms, end_ms):
+            cursor = None
+            page = 0
+            while True:
+                page += 1
+                pnl, cursor = self.get_closed_pnl(symbol, limit=100, cursor=cursor,
+                                                  start_ms=chunk_start, end_ms=chunk_end)
+                if not pnl:
+                    break
+                all_pnl.extend(pnl)
+                log.info('Fetched %d closed-PnL records (page %d)', len(all_pnl), page)
+                if not cursor:
+                    break
+        return all_pnl
+
+    def get_order_history(self, symbol, limit=50, cursor=None, start_ms=None, end_ms=None):
+        """Return one page of historical orders for a symbol."""
+        params = {'category': 'linear', 'symbol': symbol, 'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        if start_ms:
+            params['startTime'] = str(start_ms)
+        if end_ms:
+            params['endTime'] = str(end_ms)
+        data = self._request(
+            'GET', '/v5/order/history', self.demo_base_url,
+            params=params,
+        )
+        return data['result']['list'], data['result'].get('nextPageCursor')
+
+    def get_all_order_history(self, symbol, start_ms=None, end_ms=None):
+        """Fetch every historical order for symbol and return as a list.
+
+        Automatically splits requests wider than 7 days to comply with Bybit's
+        maximum time-range limit.
+        """
+        all_orders = []
+        for chunk_start, chunk_end in self._chunk_time_range(start_ms, end_ms):
+            cursor = None
+            page = 0
+            while True:
+                page += 1
+                orders, cursor = self.get_order_history(symbol, limit=50, cursor=cursor,
+                                                        start_ms=chunk_start, end_ms=chunk_end)
+                if not orders:
+                    break
+                all_orders.extend(orders)
+                log.info('Fetched %d historical orders (page %d)', len(all_orders), page)
+                if not cursor:
+                    break
+        return all_orders
+
+    def get_executions(self, symbol, limit=100, cursor=None, start_ms=None, end_ms=None):
+        """Return one page of execution/fill records for a symbol.
+
+        Use the returned 'cursor' from data['result']['nextPageCursor'] to
+        paginate backwards through history.
+        """
+        params = {'category': 'linear', 'symbol': symbol, 'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        if start_ms:
+            params['startTime'] = str(start_ms)
+        if end_ms:
+            params['endTime'] = str(end_ms)
+        data = self._request(
+            'GET', '/v5/execution/list', self.demo_base_url,
+            params=params,
+        )
+        return data['result']['list'], data['result'].get('nextPageCursor')
+
+    def get_all_executions(self, symbol, start_ms=None, end_ms=None):
+        """Fetch every execution record for symbol and return as a list.
+
+        Automatically splits requests wider than 7 days to comply with Bybit's
+        maximum time-range limit.
+        """
+        all_execs = []
+        for chunk_start, chunk_end in self._chunk_time_range(start_ms, end_ms):
+            cursor = None
+            page = 0
+            while True:
+                page += 1
+                execs, cursor = self.get_executions(symbol, limit=100, cursor=cursor,
+                                                    start_ms=chunk_start, end_ms=chunk_end)
+                if not execs:
+                    break
+                all_execs.extend(execs)
+                log.info('Fetched %d execution records (page %d)', len(all_execs), page)
+                if not cursor:
+                    break
+        return all_execs

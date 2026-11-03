@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>BTC Momentum Bot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -119,14 +122,16 @@
 </header>
 
 <div class="tabs">
-  <button class="tab active" data-target="backtest">Backtest</button>
-  <button class="tab" data-target="paper-tight">Forward Test</button>
+  <button class="tab active" data-target="backtest">Momentum_Backtest</button>
+  <button class="tab" data-target="paper-tight">Momentum forward test</button>
+  <button class="tab" data-target="wd-gann">On_Fixed_WG_Backtest</button>
+  <button class="tab" data-target="gann-forward">On Forward test</button>
+  <button class="tab" data-target="a3-backtest">A.3_Backtest</button>
 </div>
 
 <!-- Backtest tab -->
 <div id="backtest" class="tab-content active">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <div class="variant-header">Backtest — Tight variant (0.4% stop / 0.4% TP1)</div>
     <button id="bt-one-at-a-time" class="bt-toggle">Show: one trade at a time</button>
   </div>
   <div class="kpis" id="bt-kpis"></div>
@@ -139,7 +144,7 @@
     <div class="chart-wrap small"><canvas id="bt-drawdown-chart"></canvas></div>
   </div>
   <div class="panel">
-    <h2>Recent Backtest Trades</h2>
+    <h2>Recent Momentum Backtest Trades</h2>
     <table>
       <thead>
         <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
@@ -149,11 +154,14 @@
   </div>
 </div>
 
-<!-- Forward Test tab -->
+<!-- Momentum forward test tab -->
 <div id="paper-tight" class="tab-content">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <button id="pt-fvg-only" class="bt-toggle">Show: FVG strategy trades only</button>
+  </div>
   <div class="kpis" id="pt-kpis"></div>
   <div class="panel">
-    <h2>Equity Curve — Forward Test</h2>
+    <h2>Equity Curve — Momentum forward test</h2>
     <div class="chart-wrap"><canvas id="pt-equity-chart"></canvas></div>
     <div class="note">Trading capital is fixed at $92,453.04; paper PnL does not affect live Bybit equity.</div>
   </div>
@@ -162,12 +170,81 @@
     <div class="chart-wrap small"><canvas id="pt-drawdown-chart"></canvas></div>
   </div>
   <div class="panel">
-    <h2>Recent Forward Test Trades</h2>
+    <h2>Recent Momentum forward test Trades</h2>
     <table>
       <thead>
         <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
       </thead>
       <tbody id="pt-trade-log"><tr><td colspan="7" class="empty">No closed trades yet</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- On_Fixed_WG_Backtest tab -->
+<div id="wd-gann" class="tab-content">
+  <div class="kpis" id="wd-kpis"></div>
+  <div class="panel">
+    <h2>Equity Curve</h2>
+    <div class="chart-wrap"><canvas id="wd-equity-chart"></canvas></div>
+    <div class="note">Backtest with Bybit taker fees (0.06%) and slippage assumptions included. 75% base unit, 1.5x leverage.</div>
+  </div>
+  <div class="panel">
+    <h2>Drawdown %</h2>
+    <div class="chart-wrap small"><canvas id="wd-drawdown-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Recent On_Fixed_WG_Backtest Trades</h2>
+    <table>
+      <thead>
+        <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
+      </thead>
+      <tbody id="wd-trade-log"><tr><td colspan="7" class="empty">No data</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- On Forward test tab (Gann overnight live forward test) -->
+<div id="gann-forward" class="tab-content">
+  <div class="kpis" id="gf-kpis"></div>
+  <div class="panel">
+    <h2>Equity Curve — On Forward test</h2>
+    <div class="chart-wrap"><canvas id="gf-equity-chart"></canvas></div>
+    <div class="note">Allocated capital $100,000 · 75% base unit · 1.5x leverage. Live demo-market orders on Bybit.</div>
+  </div>
+  <div class="panel">
+    <h2>Drawdown %</h2>
+    <div class="chart-wrap small"><canvas id="gf-drawdown-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Recent On Forward test Trades</h2>
+    <table>
+      <thead>
+        <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
+      </thead>
+      <tbody id="gf-trade-log"><tr><td colspan="7" class="empty">No closed trades yet</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- A.3 Green/Red Weekly Backtest tab -->
+<div id="a3-backtest" class="tab-content">
+  <div class="kpis" id="a3-kpis"></div>
+  <div class="panel">
+    <h2>Equity Curve — A.3 Green/Red Weekly (Long-only)</h2>
+    <div class="chart-wrap"><canvas id="a3-equity-chart"></canvas></div>
+    <div class="note">Gann A.3 weekly trend-line rule. Long-only, 15% vol target, 36-week vol lookback, high/low confirmation. Starting capital $100,000. Bybit taker fees 0.055% each side.</div>
+  </div>
+  <div class="panel">
+    <h2>Drawdown %</h2>
+    <div class="chart-wrap small"><canvas id="a3-drawdown-chart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>Recent A.3 Backtest Trades</h2>
+    <table>
+      <thead>
+        <tr><th>Exit Time (UTC)</th><th>Side</th><th>Qty (BTC)</th><th>Entry</th><th>Exit</th><th>Points</th><th>PnL (USD)</th></tr>
+      </thead>
+      <tbody id="a3-trade-log"><tr><td colspan="7" class="empty">No data</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -188,6 +265,7 @@ const KPI_LABELS = [
   ['worst_loss', 'Worst Loss'],
   ['best_r', 'Best R:R'],
   ['worst_r', 'Worst R:R'],
+  ['avg_r', 'Avg R:R'],
   ['avg_win', 'Avg Win'],
   ['avg_loss', 'Avg Loss'],
   ['consecutive_wins', 'Consecutive Wins'],
@@ -197,8 +275,9 @@ const KPI_LABELS = [
   ['allocated_capital', 'Allocated Capital'],
 ];
 
-let btEquityChart, btDrawdownChart, ptEquityChart, ptDrawdownChart;
+let btEquityChart, btDrawdownChart, ptEquityChart, ptDrawdownChart, wdEquityChart, wdDrawdownChart, gfEquityChart, gfDrawdownChart, a3EquityChart, a3DrawdownChart;
 let btOneAtATime = false;
+let ptFvgOnly = false;
 
 function makeEquityChart(canvasId, datasets, logScale = false) {
   const ctx = document.getElementById(canvasId).getContext('2d');
@@ -276,7 +355,7 @@ function kpiClass(key, v) {
     return v >= 0 ? 'pos' : 'neg';
   }
   if (['max_drawdown','max_static_drawdown','worst_loss','avg_loss','worst_r','consecutive_losses'].includes(key)) return 'neg';
-  if (key === 'sharpe_ratio' || key === 'best_r') return v >= 1 ? 'pos' : 'plain';
+  if (key === 'sharpe_ratio' || key === 'best_r' || key === 'avg_r') return v >= 1 ? 'pos' : 'plain';
   return 'plain';
 }
 
@@ -284,7 +363,7 @@ function fmtKpi(key, v) {
   if (['win_rate','avg_monthly_return','max_drawdown','total_return','return_on_total_equity'].includes(key)) return fmtPct(v);
   if (['final_equity','total_account_equity','allocated_capital','best_win','worst_loss','avg_win','avg_loss'].includes(key)) return fmtMoney(v);
   if (key === 'profit_factor') return v === 9999.99 ? '∞' : v.toFixed(2);
-  if (key === 'sharpe_ratio' || key === 'best_r' || key === 'worst_r') return v.toFixed(2);
+  if (key === 'sharpe_ratio' || key === 'best_r' || key === 'worst_r' || key === 'avg_r') return v.toFixed(2);
   return v.toLocaleString(undefined, {maximumFractionDigits: 2});
 }
 
@@ -297,12 +376,18 @@ function renderKpiCards(containerId, kpis) {
   }).join('');
 }
 
-function renderTradeLog(tbodyId, trades) {
+function renderTradeLog(tbodyId, trades, options = {}) {
   const tbody = document.getElementById(tbodyId);
   if (!trades.length) {
     tbody.innerHTML = `<tr><td colspan="7" class="empty">No closed trades yet</td></tr>`;
     return;
   }
+  const badge = (t) => {
+    if (!options.showFvgBadge || t.is_open || t.fvg_aligned === undefined) return '';
+    return t.fvg_aligned
+      ? ' <span title="FVG strategy aligned" style="color:var(--green);font-size:10px;">●</span>'
+      : ' <span title="Not FVG strategy aligned" style="color:var(--muted);font-size:10px;">○</span>';
+  };
   tbody.innerHTML = trades.map(t => {
     if (t.is_open) {
       const sideCls = t.side === 'Buy' ? 'side-buy' : 'side-sell';
@@ -322,7 +407,7 @@ function renderTradeLog(tbodyId, trades) {
     const pnlCls = t.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
     const sideCls = t.side === 'Buy' ? 'side-buy' : 'side-sell';
     return `<tr>
-      <td>${t.exit_time}</td>
+      <td>${t.exit_time}${badge(t)}</td>
       <td class="${sideCls}">${t.side.toUpperCase()}</td>
       <td>${t.qty.toFixed(3)}</td>
       <td>${t.entry.toLocaleString()}</td>
@@ -345,21 +430,26 @@ function setupTabs() {
 }
 
 async function refreshBacktest() {
-  const endpoint = btOneAtATime ? '/api/backtest/one_at_a_time' : '/api/backtest';
-  const res = await fetch(endpoint);
-  const d = await res.json();
-  document.getElementById('updated').textContent = d.updated;
+  try {
+    const endpoint = btOneAtATime ? '/api/backtest/one_at_a_time' : '/api/backtest';
+    const res = await fetch(endpoint);
+    const d = await res.json();
+    document.getElementById('updated').textContent = d.updated || '—';
 
-  if (d.tight) {
-    renderKpiCards('bt-kpis', d.tight.kpis);
-    btEquityChart.data.datasets[0].label = d.tight.label || 'Tight equity';
-    btEquityChart.data.datasets[0].borderColor = d.tight.color || ACCENT;
-    btEquityChart.data.datasets[0].data = toPoints(d.tight.equity);
-    btEquityChart.update('none');
-    btDrawdownChart.data.datasets[0].data = toPoints(d.tight.drawdown);
-    btDrawdownChart.data.datasets[1].data = toPoints(d.tight.static_drawdown);
-    btDrawdownChart.update('none');
-    renderTradeLog('bt-trade-log', d.tight.trades);
+    if (d.tight) {
+      renderKpiCards('bt-kpis', d.tight.kpis);
+      btEquityChart.data.datasets[0].label = d.tight.label || 'Momentum Backtest equity';
+      btEquityChart.data.datasets[0].borderColor = d.tight.color || ACCENT;
+      btEquityChart.data.datasets[0].data = toPoints(d.tight.equity);
+      btEquityChart.update('none');
+      btDrawdownChart.data.datasets[0].data = toPoints(d.tight.drawdown);
+      btDrawdownChart.data.datasets[1].data = toPoints(d.tight.static_drawdown);
+      btDrawdownChart.update('none');
+      renderTradeLog('bt-trade-log', d.tight.trades);
+    }
+  } catch (err) {
+    console.error('Backtest refresh error:', err);
+    document.getElementById('bt-kpis').innerHTML = `<div class="kpi" style="grid-column:1/-1;"><div class="label">Error</div><div class="value plain">Backtest data unavailable</div></div>`;
   }
 }
 
@@ -374,38 +464,146 @@ function setupBacktestToggle() {
 }
 
 async function refreshPaper() {
-  const res = await fetch('/api/paper');
-  const d = await res.json();
-  renderKpiCards('pt-kpis', d.kpis);
-  ptEquityChart.data.datasets[0].data = toPoints(d.equity);
-  ptEquityChart.update('none');
-  ptDrawdownChart.data.datasets[0].data = toPoints(d.drawdown);
-  ptDrawdownChart.data.datasets[1].data = toPoints(d.static_drawdown);
-  ptDrawdownChart.update('none');
-  renderTradeLog('pt-trade-log', d.trades);
+  try {
+    const res = await fetch('/api/paper');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    const view = ptFvgOnly ? d.fvg_only : d.all;
+    renderKpiCards('pt-kpis', view.kpis);
+    ptEquityChart.data.datasets[0].data = toPoints(view.equity);
+    ptEquityChart.update('none');
+    ptDrawdownChart.data.datasets[0].data = toPoints(view.drawdown);
+    ptDrawdownChart.data.datasets[1].data = toPoints(view.static_drawdown);
+    ptDrawdownChart.update('none');
+    renderTradeLog('pt-trade-log', view.trades, { showFvgBadge: !ptFvgOnly });
+  } catch (err) {
+    console.error('Paper refresh error:', err);
+    document.getElementById('pt-kpis').innerHTML = `<div class="kpi" style="grid-column:1/-1;"><div class="label">Error</div><div class="value plain">Forward-test data unavailable</div></div>`;
+  }
+}
+
+function setupPaperToggle() {
+  const btn = document.getElementById('pt-fvg-only');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    ptFvgOnly = !ptFvgOnly;
+    btn.textContent = ptFvgOnly ? 'Show: all forward-test trades' : 'Show: FVG strategy trades only';
+    refreshPaper();
+  });
+}
+
+async function refreshWdGann() {
+  try {
+    const res = await fetch('/api/wd_gann');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+
+    if (d.wd_gann) {
+      renderKpiCards('wd-kpis', d.wd_gann.kpis);
+      wdEquityChart.data.datasets[0].label = d.wd_gann.label || 'On_Fixed_WG_Backtest equity';
+      wdEquityChart.data.datasets[0].borderColor = d.wd_gann.color || '#a855f7';
+      wdEquityChart.data.datasets[0].data = toPoints(d.wd_gann.equity);
+      wdEquityChart.update('none');
+      wdDrawdownChart.data.datasets[0].data = toPoints(d.wd_gann.drawdown);
+      wdDrawdownChart.data.datasets[1].data = toPoints(d.wd_gann.static_drawdown);
+      wdDrawdownChart.update('none');
+      renderTradeLog('wd-trade-log', d.wd_gann.trades);
+    }
+  } catch (err) {
+    console.error('WD Gann refresh error:', err);
+    document.getElementById('wd-kpis').innerHTML = `<div class="kpi" style="grid-column:1/-1;"><div class="label">Error</div><div class="value plain">WD Gann data unavailable</div></div>`;
+  }
+}
+
+async function refreshGannForward() {
+  try {
+    const res = await fetch('/api/gann_forward');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+
+    if (d.gann_forward) {
+      renderKpiCards('gf-kpis', d.gann_forward.kpis);
+      gfEquityChart.data.datasets[0].label = d.gann_forward.label || 'On Forward test equity';
+      gfEquityChart.data.datasets[0].borderColor = d.gann_forward.color || '#22c55e';
+      gfEquityChart.data.datasets[0].data = toPoints(d.gann_forward.equity);
+      gfEquityChart.update('none');
+      gfDrawdownChart.data.datasets[0].data = toPoints(d.gann_forward.drawdown);
+      gfDrawdownChart.data.datasets[1].data = toPoints(d.gann_forward.static_drawdown);
+      gfDrawdownChart.update('none');
+      renderTradeLog('gf-trade-log', d.gann_forward.trades);
+    }
+  } catch (err) {
+    console.error('Gann forward refresh error:', err);
+    document.getElementById('gf-kpis').innerHTML = `<div class="kpi" style="grid-column:1/-1;"><div class="label">Error</div><div class="value plain">Gann forward data unavailable</div></div>`;
+  }
+}
+
+async function refreshA3Backtest() {
+  try {
+    const res = await fetch('/api/a3_backtest');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+
+    if (d.a3) {
+      renderKpiCards('a3-kpis', d.a3.kpis);
+      a3EquityChart.data.datasets[0].label = d.a3.label || 'A.3 Green/Red Weekly equity';
+      a3EquityChart.data.datasets[0].borderColor = d.a3.color || '#06b6d4';
+      a3EquityChart.data.datasets[0].data = toPoints(d.a3.equity);
+      a3EquityChart.update('none');
+      a3DrawdownChart.data.datasets[0].data = toPoints(d.a3.drawdown);
+      a3DrawdownChart.data.datasets[1].data = toPoints(d.a3.static_drawdown);
+      a3DrawdownChart.update('none');
+      renderTradeLog('a3-trade-log', d.a3.trades);
+    }
+  } catch (err) {
+    console.error('A.3 backtest refresh error:', err);
+    document.getElementById('a3-kpis').innerHTML = `<div class="kpi" style="grid-column:1/-1;"><div class="label">Error</div><div class="value plain">A.3 backtest data unavailable</div></div>`;
+  }
 }
 
 async function refreshAll() {
-  try {
-    await refreshBacktest();
-    await refreshPaper();
-  } catch (err) {
-    console.error('Refresh error:', err);
-  }
+  await Promise.allSettled([
+    refreshBacktest(),
+    refreshPaper(),
+    refreshWdGann(),
+    refreshGannForward(),
+    refreshA3Backtest(),
+  ]);
 }
 
 function initCharts() {
   btEquityChart = makeEquityChart('bt-equity-chart', [
-    { label: 'Tight equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
+    { label: 'Momentum Backtest equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
   ], true);
   btDrawdownChart = makeDrawdownChart('bt-drawdown-chart', [
     { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
     { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
   ]);
   ptEquityChart = makeEquityChart('pt-equity-chart', [
-    { label: 'Forward Test equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
+    { label: 'Momentum forward test equity', data: [], borderColor: ACCENT, borderWidth: 2, pointRadius: 0, tension: 0.2 },
   ]);
   ptDrawdownChart = makeDrawdownChart('pt-drawdown-chart', [
+    { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
+    { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
+  ]);
+  wdEquityChart = makeEquityChart('wd-equity-chart', [
+    { label: 'On_Fixed_WG_Backtest equity', data: [], borderColor: '#a855f7', borderWidth: 2, pointRadius: 0, tension: 0.2 },
+  ], true);
+  wdDrawdownChart = makeDrawdownChart('wd-drawdown-chart', [
+    { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
+    { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
+  ]);
+  gfEquityChart = makeEquityChart('gf-equity-chart', [
+    { label: 'On Forward test equity', data: [], borderColor: '#22c55e', borderWidth: 2, pointRadius: 0, tension: 0.2 },
+  ]);
+  gfDrawdownChart = makeDrawdownChart('gf-drawdown-chart', [
+    { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
+    { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
+  ]);
+  a3EquityChart = makeEquityChart('a3-equity-chart', [
+    { label: 'A.3 Green/Red Weekly equity', data: [], borderColor: '#06b6d4', borderWidth: 2, pointRadius: 0, tension: 0.2 },
+  ], true);
+  a3DrawdownChart = makeDrawdownChart('a3-drawdown-chart', [
     { label: 'Trailing DD %', data: [], borderColor: RED, borderWidth: 1.5, pointRadius: 0, tension: 0.2, backgroundColor: 'rgba(246, 70, 93, 0.12)', fill: true },
     { label: 'Static DD %', data: [], borderColor: '#f7c566', borderWidth: 1.5, pointRadius: 0, tension: 0.2, borderDash: [6, 4] },
   ]);
@@ -413,6 +611,7 @@ function initCharts() {
 
 setupTabs();
 setupBacktestToggle();
+setupPaperToggle();
 initCharts();
 refreshAll();
 setInterval(refreshAll, 15000);

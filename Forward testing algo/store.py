@@ -371,6 +371,7 @@ def compute_kpis(trades, equity_points, base_capital, account_points=None):
     r_values = np.array(r_values, dtype=float)
     kpis['best_r'] = float(r_values.max()) if len(r_values) else 0.0
     kpis['worst_r'] = float(r_values.min()) if len(r_values) else 0.0
+    kpis['avg_r'] = float(r_values.mean()) if len(r_values) else 0.0
 
     kpis['avg_win'] = float(wins.mean()) if len(wins) else 0.0
     kpis['avg_loss'] = float(losses.mean()) if len(losses) else 0.0
