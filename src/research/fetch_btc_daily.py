@@ -5,6 +5,7 @@ and save to a CSV file for backtesting.
 
 import os
 import time
+from pathlib import Path
 import pandas as pd
 from datetime import datetime, timezone
 
