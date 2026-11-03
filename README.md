@@ -146,6 +146,30 @@ sudo ufw allow 5556/tcp
 The bot health endpoint runs on port 5557; open it only if you want external
 monitoring of that port.
 
+## Notifications (Telegram / Email)
+
+The bot can send alerts on every **entry**, **SL trail**, **TP hit**, and **SL hit**
+for both live and paper trades.
+
+1. Copy `.env.example` to `.env` and fill in either Telegram or SMTP details:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   TELEGRAM_CHAT_ID=your_chat_id
+   ```
+
+   To get a Telegram token, message [@BotFather](https://t.me/BotFather).
+   To get your chat ID, message [@userinfobot](https://t.me/userinfobot) or open
+   `https://api.telegram.org/bot<token>/getUpdates` after messaging your bot.
+
+2. Restart the bot:
+
+   ```bash
+   sudo systemctl restart btc-fvg-bot.service
+   ```
+
+Leave all notification env vars blank to disable alerts.
+
 ## Regenerating backtest data
 
 ```bash

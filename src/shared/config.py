@@ -38,3 +38,13 @@ RISK_PER_TRADE_PCT = float(os.getenv('RISK_PER_TRADE_PCT', '1.0'))   # % of trad
 TRADING_CAPITAL_PCT = float(os.getenv('TRADING_CAPITAL_PCT', '20.0')) # only this % of total equity is used for trading
 HISTORY_BARS = int(os.getenv('HISTORY_BARS', '300'))                 # bars loaded for signal calc
 POLL_SECONDS = int(os.getenv('POLL_SECONDS', '10'))                  # how often to check for a new bar
+
+# --- Notifications (optional) ---
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
+EMAIL_SMTP_HOST = os.getenv('EMAIL_SMTP_HOST', '')
+EMAIL_SMTP_PORT = int(os.getenv('EMAIL_SMTP_PORT', '587'))
+EMAIL_SMTP_USER = os.getenv('EMAIL_SMTP_USER', '')
+EMAIL_SMTP_PASSWORD = os.getenv('EMAIL_SMTP_PASSWORD', '')
+EMAIL_FROM = os.getenv('EMAIL_FROM', '')
+EMAIL_TO = os.getenv('EMAIL_TO', '')

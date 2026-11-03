@@ -29,6 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.shared import config
+from src.shared import notify
 from src.shared import store
 from src.shared.bybit_client import BybitClient
 from src.fvg.strategy import Direction, generate_setups, diagnose_latest_bar
@@ -281,6 +282,10 @@ def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_
             variant, side, qty, setup.entry_price, setup.stop_price,
             setup.runner_max_price, setup.tp1_price, trail_dist, order_id,
         )
+        notify.notify_entry(
+            variant, side, qty, setup.entry_price, setup.stop_price,
+            setup.tp1_price, setup.runner_max_price, live=True,
+        )
         return {
             "order_id": order_id,
             "variant": variant,
@@ -384,6 +389,9 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
                     "LIVE %s TP1 hit at %.2f | new trailing SL=%.2f bar=%s",
                     trade.get("variant"), tp1, current_sl, bar_ts,
                 )
+                notify.notify_sl_trail(
+                    trade.get("variant", ""), tp1, current_sl, extreme, bar_ts, live=True,
+                )
 
         # Update trailing SL if already activated
         if tp1_hit:
@@ -410,14 +418,18 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
                         )
                         _close_live_position_immediately(trade, "trail_1r_immediate")
                     else:
+                        old_sl = float(trade.get("current_sl", current_sl))
                         client.set_trading_stop(SYMBOL, stop_loss=current_sl)
                         log.info(
                             "LIVE %s trailing SL moved %.2f -> %.2f (extreme=%.2f) bar=%s",
                             trade.get("variant"),
-                            float(trade.get("current_sl", current_sl)),
+                            old_sl,
                             current_sl,
                             extreme,
                             bar_ts,
+                        )
+                        notify.notify_sl_trail(
+                            trade.get("variant", ""), old_sl, current_sl, extreme, bar_ts, live=True,
                         )
                 except Exception as exc:
                     log.warning(
@@ -528,15 +540,21 @@ def _sync_live_closed_pnl(open_live_trades: list[dict], capital: dict, daily_pnl
             close_day = pd.to_datetime(close_ts_ms, unit="ms", utc=True).normalize()
             daily_pnl[variant][close_day] = daily_pnl[variant].get(close_day, 0.0) + pnl
             store.append_variant_equity_point(variant, close_ts_ms / 1000, capital[variant])
+        entry_price = float(row.get("avgEntryPrice", 0))
+        qty = float(row.get("qty", 0) or 0)
         log.info(
             "LIVE %s trade CLOSED | reason=%s entry=%.2f exit=%.2f qty=%s pnl=%.2f equity=%.2f",
             variant,
             exit_reason,
-            float(row.get("avgEntryPrice", 0)),
+            entry_price,
             exit_price,
             row.get("qty"),
             pnl,
             capital[variant],
+        )
+        notify.notify_exit(
+            variant, trade.get("side", ""), qty, entry_price, exit_price,
+            pnl, exit_reason, capital[variant], live=True,
         )
         open_live_trades.remove(trade)
         recorded += 1
@@ -859,6 +877,7 @@ def main():
                         daily_pnl[variant][exit_day] = daily_pnl[variant].get(exit_day, 0.0) + closed["pnl"]
                         ts_sec = int(latest_bar["timestamp"].timestamp())
                         store.append_variant_equity_point(variant, ts_sec, capital[variant])
+                        exit_reason = closed["raw"]["exit_reason"]
                         log.info(
                             "CLOSED %s %s trade | entry=%.2f exit=%.2f pnl=%.2f reason=%s equity=%.2f",
                             variant,
@@ -866,8 +885,13 @@ def main():
                             closed["entry_price"],
                             closed["exit_price"],
                             closed["pnl"],
-                            closed["raw"]["exit_reason"],
+                            exit_reason,
                             capital[variant],
+                        )
+                        notify.notify_exit(
+                            variant, closed["side"], closed["qty"],
+                            closed["entry_price"], closed["exit_price"],
+                            closed["pnl"], exit_reason, capital[variant], live=False,
                         )
                     open_trades[variant] = still_open
                     _state["capital"][variant] = capital[variant]
@@ -944,6 +968,7 @@ def main():
 
                         open_trades[variant].append(trade)
                         new_setups += 1
+                        side_str = "Buy" if setup.direction == Direction.LONG else "Sell"
                         log.info(
                             "NEW %s setup | %s entry=%.2f stop=%.2f tp1=%.2f runner=%.2f qty=%.3f",
                             variant,
@@ -953,6 +978,10 @@ def main():
                             setup.tp1_price,
                             setup.runner_max_price,
                             trade.qty,
+                        )
+                        notify.notify_entry(
+                            variant, side_str, trade.qty, setup.entry_price,
+                            setup.stop_price, setup.tp1_price, setup.runner_max_price, live=False,
                         )
 
                     if new_setups:
