@@ -29,6 +29,9 @@ from src.shared.bybit_client import BybitClient
 BASE_DIR = config.PROJECT_ROOT
 DATA_DIR = BASE_DIR / "data"
 
+CACHE_M15_PATH = DATA_DIR / "fvg_backtest_m15.pkl"
+CACHE_H1_PATH = DATA_DIR / "fvg_backtest_h1.pkl"
+
 TRADING_CAPITAL = 92_453.04
 RISK_PER_TRADE_PCT = 0.005
 USE_FIXED_RISK = True
@@ -72,6 +75,57 @@ def _load_klines(client: BybitClient, symbol: str, interval: str,
     return df
 
 
+def _load_cached_klines(cache_path: Path) -> pd.DataFrame | None:
+    """Load cached klines if available."""
+    if not cache_path.exists():
+        return None
+    try:
+        df = pd.read_pickle(cache_path)
+        print(f"Loaded cache {cache_path.name}: {len(df)} rows up to {df['timestamp'].iloc[-1]}")
+        return df
+    except Exception as exc:
+        print(f"Could not load cache {cache_path.name}: {exc}; re-fetching from scratch")
+        return None
+
+
+def _save_cached_klines(df: pd.DataFrame, cache_path: Path) -> None:
+    """Save klines cache to disk."""
+    df.to_pickle(cache_path)
+
+
+def _load_or_update_klines(
+    client: BybitClient,
+    symbol: str,
+    interval: str,
+    cache_path: Path,
+    default_start_ms: int,
+) -> pd.DataFrame:
+    """Load cached klines and incrementally fetch only new bars."""
+    cached = _load_cached_klines(cache_path)
+    now_ms = int(time.time() * 1000)
+
+    if cached is not None and not cached.empty:
+        # Fetch from the last cached timestamp onwards.
+        last_ts_ms = int(cached["timestamp"].iloc[-1].timestamp() * 1000)
+        start_ms = last_ts_ms + 1
+        print(f"Fetching {interval} klines incremental from {cached['timestamp'].iloc[-1]} ...")
+        new_df = _load_klines(client, symbol, interval, start_ms=start_ms, end_ms=now_ms)
+        if new_df.empty:
+            print(f"No new {interval} bars available")
+            df = cached
+        else:
+            df = pd.concat([cached, new_df], ignore_index=True)
+            df = df.drop_duplicates(subset=["timestamp"], keep="last")
+            df = df.sort_values("timestamp").reset_index(drop=True)
+            print(f"Appended {len(new_df)} new {interval} rows; total {len(df)}")
+    else:
+        print(f"Fetching {interval} klines from scratch ...")
+        df = _load_klines(client, symbol, interval, start_ms=default_start_ms, end_ms=now_ms)
+
+    _save_cached_klines(df, cache_path)
+    return df
+
+
 def _build_trade_dict(row: pd.Series, variant: str) -> dict:
     side = "Buy" if row["direction"] == "long" else "Sell"
     qty = row["size_usd"] / row["entry_price"] if row["entry_price"] else 0.0
@@ -106,10 +160,10 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
 
     # Fetch as much history as Bybit allows. Start from 2020-03-25; earlier
     # dates can cause Bybit public kline service errors.
-    start_ms = int(datetime(2020, 3, 25, tzinfo=timezone.utc).timestamp() * 1000)
+    default_start_ms = int(datetime(2020, 3, 25, tzinfo=timezone.utc).timestamp() * 1000)
 
-    df5 = _load_klines(client, "BTCUSDT", "15", start_ms=start_ms)
-    df1h = _load_klines(client, "BTCUSDT", "60", start_ms=start_ms)
+    df5 = _load_or_update_klines(client, "BTCUSDT", "15", CACHE_M15_PATH, default_start_ms)
+    df1h = _load_or_update_klines(client, "BTCUSDT", "60", CACHE_H1_PATH, default_start_ms)
 
     # Drop the current forming bar so the backtest uses only completed bars,
     # matching the corrected live bot and avoiding ephemeral end-of-window setups.
