@@ -243,20 +243,21 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
     new_trades = [_build_trade_dict(row, variant) for _, row in new_trades_df.iterrows()]
 
     if existing is not None:
-        last_old_ts = existing["_last_ts"]
-        old_trades = [t for t in existing["trades"] if t["exit_ts"] <= last_old_ts]
+        last_old_ts_ms = existing["_last_ts"]
+        last_old_ts_sec = last_old_ts_ms // 1000
+        old_trades = [t for t in existing["trades"] if t["exit_ts"] <= last_old_ts_ms]
         old_equity_ts = existing["equity"]["ts"]
         old_equity_values = existing["equity"]["values"]
         old_equity_points = [
             [int(ts), float(eq)]
             for ts, eq in zip(old_equity_ts, old_equity_values)
-            if int(ts) <= last_old_ts
+            if int(ts) <= last_old_ts_sec
         ]
 
         # Drop new data that overlaps the old window to avoid duplicates.
-        combined_trades = old_trades + [t for t in new_trades if t["exit_ts"] > last_old_ts]
+        combined_trades = old_trades + [t for t in new_trades if t["exit_ts"] > last_old_ts_ms]
         combined_equity_points = (
-            old_equity_points + [p for p in new_equity_points if p[0] > last_old_ts]
+            old_equity_points + [p for p in new_equity_points if p[0] > last_old_ts_sec]
         )
 
         # Build combined DataFrames for metrics recomputation.
@@ -265,7 +266,7 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
         combined_trades_df = pd.concat(
             [
                 pd.DataFrame(old_trades),
-                new_trades_df[new_trades_df["exit_time"] > pd.to_datetime(last_old_ts, unit="ms", utc=True)],
+                new_trades_df[new_trades_df["exit_time"] > pd.to_datetime(last_old_ts_ms, unit="ms", utc=True)],
             ],
             ignore_index=True,
         ) if not new_trades_df.empty else pd.DataFrame(old_trades)
