@@ -1055,6 +1055,9 @@ def main():
                                 fvg_lookforward=COMMON_PARAMS.get("fvg_lookforward", 8),
                             )
                             reasons = "; ".join(diag["reasons"]) if diag["reasons"] else "all criteria met but no actionable setup"
+                            leg_info = f"idx{diag['leg_end_idx']} br={diag['leg_min_body_ratio']:.2f}" if diag["leg_end_idx"] is not None else "none"
+                            body_ratio = f"{diag['leg_min_body_ratio']:.2f}" if diag["leg_min_body_ratio"] is not None else "n/a"
+                            htf_str = "aligned" if diag["htf_aligned"] else "not_aligned"
                             log.info(
                                 "%s: no setup on %s | session=%s | fvg=%s | leg=%s | "
                                 "body_ratio=%s | htf=%s | reasons: %s",
@@ -1062,9 +1065,19 @@ def main():
                                 latest_ts,
                                 diag["session"],
                                 diag["fvg_direction"] or "none",
-                                f"idx{diag['leg_end_idx']} br={diag['leg_min_body_ratio']:.2f}" if diag["leg_end_idx"] is not None else "none",
-                                f"{diag['leg_min_body_ratio']:.2f}" if diag["leg_min_body_ratio"] is not None else "n/a",
-                                "aligned" if diag["htf_aligned"] else "not_aligned",
+                                leg_info,
+                                body_ratio,
+                                htf_str,
+                                reasons,
+                            )
+                            notify.notify_no_setup(
+                                variant,
+                                latest_ts,
+                                diag["session"],
+                                diag["fvg_direction"],
+                                leg_info,
+                                body_ratio,
+                                diag["htf_aligned"],
                                 reasons,
                             )
                         except Exception as exc:

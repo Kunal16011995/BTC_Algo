@@ -162,3 +162,27 @@ def notify_exit(
         f"Equity: ${equity:,.2f}",
         subject=f"{channel} Exit {reason} | PnL ${pnl:,.2f}",
     )
+
+
+def notify_no_setup(
+    variant: str,
+    bar_ts,
+    session: str,
+    fvg_direction: str | None,
+    leg_info: str,
+    body_ratio: str,
+    htf_aligned: bool,
+    reasons: str,
+) -> None:
+    """Notify why the strategy did not produce a setup on the latest closed bar."""
+    send(
+        f"<b>No Setup — {variant}</b>\n"
+        f"Bar: {bar_ts}\n"
+        f"Session: {session}\n"
+        f"FVG: {fvg_direction or 'none'}\n"
+        f"Leg: {leg_info}\n"
+        f"Body ratio: {body_ratio}\n"
+        f"HTF: {'aligned' if htf_aligned else 'not_aligned'}\n"
+        f"Reasons: {reasons}",
+        subject=f"No setup {variant} @ {bar_ts}",
+    )
