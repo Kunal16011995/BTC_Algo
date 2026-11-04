@@ -154,20 +154,55 @@ def _build_trade_dict(row: pd.Series, variant: str) -> dict:
     }
 
 
+def _load_existing_backtest(variant: str) -> dict | None:
+    """Load previously computed backtest JSON so we can extend it incrementally."""
+    path = DATA_DIR / f"fvg_backtest_{variant}.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        trades = payload.get("trades", [])
+        equity_ts = payload.get("equity", {}).get("ts", [])
+        last_exit_ts = max(t["exit_ts"] for t in trades) if trades else None
+        last_equity_ts = max(equity_ts) if equity_ts else None
+        last_ts = max(filter(None, [last_exit_ts, last_equity_ts]), default=None)
+        if last_ts is None:
+            return None
+        payload["_last_ts"] = last_ts
+        print(f"Existing backtest has {len(trades)} trades up to ts={last_ts}")
+        return payload
+    except Exception as exc:
+        print(f"Could not load existing backtest: {exc}; rebuilding from scratch")
+        return None
+
+
 def _run_variant(client: BybitClient, variant: str, params: dict, capital: float):
     print(f"Running backtest for variant: {variant} ...")
     t0 = time.time()
 
-    # Default start date: 2025-01-01.  This keeps daily dashboard updates fast
-    # while still providing enough history for the strategy to warm up its HTF
-    # levels.  Override with BACKTEST_START_DATE=2020-03-25 if you ever need a
-    # full historical rebuild (one-time, slower).
-    start_date_str = os.getenv("BACKTEST_START_DATE", "2025-01-01")
-    start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    default_start_ms = int(start_dt.timestamp() * 1000)
+    existing = _load_existing_backtest(variant)
 
-    df5 = _load_or_update_klines(client, "BTCUSDT", "15", CACHE_M15_PATH, default_start_ms)
-    df1h = _load_or_update_klines(client, "BTCUSDT", "60", CACHE_H1_PATH, default_start_ms)
+    # Lookback window for HTF warm-up when extending an existing backtest.
+    lookback_days = int(os.getenv("BACKTEST_LOOKBACK_DAYS", "90"))
+    lookback_ms = lookback_days * 24 * 60 * 60 * 1000
+
+    if existing is not None:
+        last_old_ts_ms = existing["_last_ts"]
+        # Fetch enough history before the last old trade so HTF levels warm up.
+        fetch_start_ms = max(0, last_old_ts_ms - lookback_ms)
+        run_capital = float(existing["kpis"]["final_equity"])
+        print(f"Extending existing backtest from ts={last_old_ts_ms} with capital ${run_capital:,.2f}")
+    else:
+        start_date_str = os.getenv("BACKTEST_START_DATE", "2025-01-01")
+        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        fetch_start_ms = int(start_dt.timestamp() * 1000)
+        run_capital = capital
+        print(f"Building backtest from {start_date_str} with capital ${run_capital:,.2f}")
+
+    now_ms = int(time.time() * 1000)
+    df5 = _load_klines(client, "BTCUSDT", "15", start_ms=fetch_start_ms, end_ms=now_ms)
+    df1h = _load_klines(client, "BTCUSDT", "60", start_ms=fetch_start_ms, end_ms=now_ms)
 
     # Drop the current forming bar so the backtest uses only completed bars,
     # matching the corrected live bot and avoiding ephemeral end-of-window setups.
@@ -179,15 +214,15 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
     print(f"Loaded M15: {df5.shape}, from {df5['timestamp'].iloc[0]} to {df5['timestamp'].iloc[-1]}")
     print(f"Loaded H1:  {df1h.shape}, from {df1h['timestamp'].iloc[0]} to {df1h['timestamp'].iloc[-1]}")
 
-    fixed_risk_amount = capital * RISK_PER_TRADE_PCT if USE_FIXED_RISK else None
+    fixed_risk_amount = run_capital * RISK_PER_TRADE_PCT if USE_FIXED_RISK else None
     fixed_daily_loss_cap = (
-        fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else capital * 0.003
+        fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else run_capital * 0.003
     )
 
     result = run_backtest(
         df5,
         df1h,
-        capital=capital,
+        capital=run_capital,
         risk_per_trade_pct=None if USE_FIXED_RISK else RISK_PER_TRADE_PCT,
         fixed_risk_amount=fixed_risk_amount,
         daily_loss_cap_pct=None,
@@ -198,22 +233,60 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
         **params,
     )
 
-    equity_df = result["equity"]
-    trades_df = result["trades"]
+    new_equity_df = result["equity"]
+    new_trades_df = result["trades"]
 
-    equity_points = [
+    new_equity_points = [
         [int(ts.timestamp()), float(eq)]
-        for ts, eq in zip(equity_df["timestamp"], equity_df["equity"])
+        for ts, eq in zip(new_equity_df["timestamp"], new_equity_df["equity"])
     ]
+    new_trades = [_build_trade_dict(row, variant) for _, row in new_trades_df.iterrows()]
 
-    trades = [_build_trade_dict(row, variant) for _, row in trades_df.iterrows()]
+    if existing is not None:
+        last_old_ts = existing["_last_ts"]
+        old_trades = [t for t in existing["trades"] if t["exit_ts"] <= last_old_ts]
+        old_equity_ts = existing["equity"]["ts"]
+        old_equity_values = existing["equity"]["values"]
+        old_equity_points = [
+            [int(ts), float(eq)]
+            for ts, eq in zip(old_equity_ts, old_equity_values)
+            if int(ts) <= last_old_ts
+        ]
 
-    kpis = store.compute_kpis(trades, equity_points, capital)
+        # Drop new data that overlaps the old window to avoid duplicates.
+        combined_trades = old_trades + [t for t in new_trades if t["exit_ts"] > last_old_ts]
+        combined_equity_points = (
+            old_equity_points + [p for p in new_equity_points if p[0] > last_old_ts]
+        )
+
+        # Build combined DataFrames for metrics recomputation.
+        combined_equity_df = pd.DataFrame(combined_equity_points, columns=["timestamp", "equity"])
+        combined_equity_df["timestamp"] = pd.to_datetime(combined_equity_df["timestamp"], unit="s", utc=True)
+        combined_trades_df = pd.concat(
+            [
+                pd.DataFrame(old_trades),
+                new_trades_df[new_trades_df["exit_time"] > pd.to_datetime(last_old_ts, unit="ms", utc=True)],
+            ],
+            ignore_index=True,
+        ) if not new_trades_df.empty else pd.DataFrame(old_trades)
+
+        print(
+            f"Combined: {len(old_trades)} old trades + "
+            f"{len(combined_trades) - len(old_trades)} new trades"
+        )
+    else:
+        combined_trades = new_trades
+        combined_equity_points = new_equity_points
+        combined_equity_df = new_equity_df
+        combined_trades_df = new_trades_df
+
+    # The allocated capital reference stays the original trading capital.
+    kpis = store.compute_kpis(combined_trades, combined_equity_points, capital)
     kpis["total_account_equity"] = kpis["final_equity"]
     kpis["allocated_capital"] = capital
     kpis["return_on_total_equity"] = kpis["total_return"]
 
-    metrics = compute_metrics(equity_df, trades_df, capital)
+    metrics = compute_metrics(combined_equity_df, combined_trades_df, capital)
 
     payload = {
         "variant": variant,
@@ -221,14 +294,14 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
         "capital": capital,
         "total_account_equity": capital,
         "risk_per_trade_pct": None if USE_FIXED_RISK else RISK_PER_TRADE_PCT,
-        "fixed_risk_amount": fixed_risk_amount if USE_FIXED_RISK else None,
+        "fixed_risk_amount": capital * RISK_PER_TRADE_PCT if USE_FIXED_RISK else None,
         "daily_loss_cap_pct": None,
-        "fixed_daily_loss_cap": fixed_daily_loss_cap,
+        "fixed_daily_loss_cap": capital * RISK_PER_TRADE_PCT * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else capital * 0.003,
         "daily_loss_cap_multiplier": DAILY_LOSS_CAP_MULTIPLIER,
         "kpis": kpis,
         "metrics": metrics,
-        "equity": {"ts": [p[0] for p in equity_points], "values": [p[1] for p in equity_points]},
-        "trades": trades,
+        "equity": {"ts": [p[0] for p in combined_equity_points], "values": [p[1] for p in combined_equity_points]},
+        "trades": combined_trades,
     }
 
     out_path = DATA_DIR / f"fvg_backtest_{variant}.json"
@@ -237,7 +310,7 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
 
     elapsed = time.time() - t0
     print(
-        f"  -> {len(trades)} trades, final equity ${kpis['final_equity']:.2f}, "
+        f"  -> {len(combined_trades)} total trades, final equity ${kpis['final_equity']:.2f}, "
         f"Sharpe {kpis['sharpe_ratio']:.2f}, max DD {kpis['max_drawdown']:.2f}% "
         f"({elapsed:.1f}s)"
     )
