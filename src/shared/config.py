@@ -50,4 +50,4 @@ EMAIL_FROM = os.getenv('EMAIL_FROM', '')
 EMAIL_TO = os.getenv('EMAIL_TO', '')
 
 # --- Heartbeat notifications ---
-HEARTBEAT_INTERVAL_SECONDS = int(os.getenv('HEARTBEAT_INTERVAL_SECONDS', '240'))
+HEARTBEAT_INTERVAL_SECONDS = int(os.getenv('HEARTBEAT_INTERVAL_SECONDS', '60'))

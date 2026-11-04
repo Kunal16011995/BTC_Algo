@@ -164,7 +164,7 @@ scanning M15 bars even when no trades are placed.
    To get your chat ID, message [@userinfobot](https://t.me/userinfobot) or open
    `https://api.telegram.org/bot<token>/getUpdates` after messaging your bot.
 
-2. Adjust the heartbeat interval if desired (default 240 seconds = 4 minutes,
+2. Adjust the heartbeat interval if desired (default 60 seconds = 1 minute,
    set to `0` to disable):
 
    ```bash

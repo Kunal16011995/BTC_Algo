@@ -783,7 +783,7 @@ def _heartbeat_loop(interval_seconds: int) -> None:
 
 
 def _start_heartbeat() -> None:
-    interval = getattr(config, "HEARTBEAT_INTERVAL_SECONDS", 240)
+    interval = getattr(config, "HEARTBEAT_INTERVAL_SECONDS", 60)
     if interval <= 0:
         log.info("Heartbeat notifications disabled (interval=%s)", interval)
         return
