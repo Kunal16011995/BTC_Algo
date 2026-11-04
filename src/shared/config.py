@@ -51,3 +51,8 @@ EMAIL_TO = os.getenv('EMAIL_TO', '')
 
 # --- Heartbeat notifications ---
 HEARTBEAT_INTERVAL_SECONDS = int(os.getenv('HEARTBEAT_INTERVAL_SECONDS', '300'))
+
+# --- Telegram auto-delete ---
+# Delete bot notification messages after this many seconds (default 24h).
+# Set to 0 to keep messages forever.
+TELEGRAM_MESSAGE_TTL_SECONDS = int(os.getenv('TELEGRAM_MESSAGE_TTL_SECONDS', '86400'))
