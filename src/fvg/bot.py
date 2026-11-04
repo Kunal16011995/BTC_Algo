@@ -763,7 +763,7 @@ def _heartbeat_loop(interval_seconds: int) -> None:
             equity_str = ", ".join(
                 f"{k}: ${v:,.2f}" for k, v in equity.items()
             )
-            notify.send(
+            ok = notify.send(
                 f"<b>FVG Bot Heartbeat</b>\n"
                 f"Status: OK\n"
                 f"Time (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -773,14 +773,17 @@ def _heartbeat_loop(interval_seconds: int) -> None:
                 f"Equity: {equity_str or 'n/a'}",
                 subject="FVG Bot Heartbeat OK",
             )
-            log.info("Heartbeat notification sent")
+            if ok:
+                log.info("Heartbeat notification sent")
+            else:
+                log.warning("Heartbeat notification failed (no channel succeeded)")
         except Exception as exc:
             log.warning("Heartbeat notification failed: %s", exc)
         time.sleep(_seconds_to_next_boundary(interval_seconds))
 
 
 def _start_heartbeat() -> None:
-    interval = getattr(config, "HEARTBEAT_INTERVAL_SECONDS", 900)
+    interval = getattr(config, "HEARTBEAT_INTERVAL_SECONDS", 240)
     if interval <= 0:
         log.info("Heartbeat notifications disabled (interval=%s)", interval)
         return

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import time
 from email.mime.text import MIMEText
 from typing import Callable
 
@@ -21,31 +22,42 @@ EMAIL_SMTP_PASSWORD = getattr(config, "EMAIL_SMTP_PASSWORD", "")
 EMAIL_FROM = getattr(config, "EMAIL_FROM", "")
 EMAIL_TO = getattr(config, "EMAIL_TO", "")
 
+# Reuse TCP connections for Telegram; retry on transient network errors.
+_telegram_session = requests.Session()
+
 
 def _noop(msg: str) -> None:
     pass
 
 
-def _send_telegram(msg: str) -> None:
+def _send_telegram(msg: str) -> bool:
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": msg,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }
-        resp = requests.post(url, json=payload, timeout=15)
-        resp.raise_for_status()
-    except Exception as exc:
-        log.warning("Telegram notification failed: %s", exc)
+        return False
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            resp = _telegram_session.post(url, json=payload, timeout=15)
+            resp.raise_for_status()
+            return True
+        except Exception as exc:
+            last_exc = exc
+            log.warning("Telegram send attempt %s/3 failed: %s", attempt, exc)
+            if attempt < 3:
+                time.sleep(2 ** attempt)  # 2s, 4s backoff
+    log.warning("Telegram notification failed after 3 attempts: %s", last_exc)
+    return False
 
 
-def _send_email(msg: str, subject: str = "BTC FVG Bot Alert") -> None:
+def _send_email(msg: str, subject: str = "BTC FVG Bot Alert") -> bool:
     if not all([EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD, EMAIL_FROM, EMAIL_TO]):
-        return
+        return False
     try:
         mime = MIMEText(msg)
         mime["Subject"] = subject
@@ -55,29 +67,33 @@ def _send_email(msg: str, subject: str = "BTC FVG Bot Alert") -> None:
             server.starttls()
             server.login(EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD)
             server.sendmail(EMAIL_FROM, [EMAIL_TO], mime.as_string())
+        return True
     except Exception as exc:
         log.warning("Email notification failed: %s", exc)
+        return False
 
 
-def _dispatchers() -> list[Callable[[str], None]]:
-    dispatchers: list[Callable[[str], None]] = []
+def _dispatchers() -> list[Callable[[str], bool]]:
+    dispatchers: list[Callable[[str], bool]] = []
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         dispatchers.append(_send_telegram)
     if EMAIL_SMTP_HOST and EMAIL_SMTP_USER and EMAIL_SMTP_PASSWORD and EMAIL_TO:
-        dispatchers.append(_send_email)
+        # email signature is (msg, subject), wrapped below
+        dispatchers.append(lambda msg: _send_email(msg))
     return dispatchers
 
 
-def send(msg: str, subject: str = "BTC FVG Bot Alert") -> None:
-    """Send a notification via all configured channels."""
+def send(msg: str, subject: str = "BTC FVG Bot Alert") -> bool:
+    """Send a notification via all configured channels. Returns True if at least one channel succeeded."""
+    success = False
     for fn in _dispatchers():
         try:
-            if fn is _send_email:
-                fn(msg, subject)
-            else:
-                fn(msg)
+            result = fn(msg)
+            if result:
+                success = True
         except Exception as exc:
             log.warning("Notification channel failed: %s", exc)
+    return success
 
 
 def notify_entry(
