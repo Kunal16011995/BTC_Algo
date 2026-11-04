@@ -1,0 +1,148 @@
+BTC FVG Momentum Bot — Command Reference
+==========================================
+
+Project paths
+-------------
+Local (Windows):  C:\Algos\Crypto\BTC
+VPS (Ubuntu):     /opt/trading-bot/BTC_Algo
+VPS IP:           157.20.182.112
+
+
+SSH into the VPS
+----------------
+ssh root@157.20.182.112
+(enter password when prompted)
+
+
+Restart the bot
+---------------
+cd /opt/trading-bot/BTC_Algo
+sudo systemctl restart btc-fvg-bot.service
+
+# Check it came back up
+sleep 5
+curl http://127.0.0.1:5557/health
+
+
+Check bot status
+----------------
+sudo systemctl status btc-fvg-bot.service --no-pager
+
+
+Watch live logs
+---------------
+cd /opt/trading-bot/BTC_Algo
+tail -f logs/fvg_paper_bot.log
+
+# Or via systemd journal
+sudo journalctl -u btc-fvg-bot.service -f
+
+# Last 50 lines
+sudo journalctl -u btc-fvg-bot.service -n 50 --no-pager
+
+
+Health check
+------------
+curl http://127.0.0.1:5557/health
+
+
+Stop / start the bot
+--------------------
+sudo systemctl stop btc-fvg-bot.service
+sudo systemctl start btc-fvg-bot.service
+
+# Disable auto-start on boot
+sudo systemctl disable btc-fvg-bot.service
+
+# Enable auto-start on boot
+sudo systemctl enable btc-fvg-bot.service
+
+
+Update bot code from GitHub
+---------------------------
+cd /opt/trading-bot/BTC_Algo
+git pull
+sudo systemctl restart btc-fvg-bot.service
+
+
+Update local backtest dashboard
+-------------------------------
+cd C:\Algos\Crypto\BTC
+python -m src.fvg.compute_backtest
+
+# Or start the dashboard (auto-updates backtest first)
+scripts\run_dashboard.bat
+
+
+Check open positions on Bybit
+-----------------------------
+# This uses the bot's Bybit client. From VPS project root:
+cd /opt/trading-bot/BTC_Algo
+/opt/trading-bot/venv/bin/python3 -c "
+from src.shared.bybit_client import BybitClient
+from src.shared import config
+c = BybitClient(config.BYBIT_API_KEY, config.BYBIT_API_SECRET, config.BYBIT_DEMO_BASE_URL, config.BYBIT_PUBLIC_BASE_URL)
+print(c.get_position('BTCUSDT'))
+"
+
+
+Telegram quick test
+-------------------
+# Send a test message from the VPS
+curl -s -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage" \
+  -d "chat_id=<YOUR_CHAT_ID>" \
+  -d "text=Test from VPS"
+
+# Get chat ID from bot updates
+curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates"
+
+
+Environment variables (.env)
+----------------------------
+# Edit on VPS
+nano /opt/trading-bot/BTC_Algo/.env
+
+# Important variables
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+HEARTBEAT_INTERVAL_SECONDS=300          # 5 minutes
+TELEGRAM_MESSAGE_TTL_SECONDS=86400      # auto-delete after 24h
+BACKTEST_START_DATE=2025-01-01
+
+After editing .env, restart the bot:
+sudo systemctl restart btc-fvg-bot.service
+
+
+Common troubleshooting
+----------------------
+# Bot keeps crashing — check last error
+sudo journalctl -u btc-fvg-bot.service -n 100 --no-pager
+
+# Port 5557 not reachable — wait 10s after restart, then:
+ss -tlnp | grep 5557
+
+# Telegram not arriving but heartbeat works
+# Usually VPS-to-Telegram network flakiness. Already retried 5 times.
+# If persistent, increase HEARTBEAT_INTERVAL_SECONDS to reduce frequency.
+
+# No-setup reasons not arriving
+# Confirm code is present: grep notify_no_setup src/fvg/bot.py
+# Confirm bot is processing 15-minute bars in logs/fvg_paper_bot.log
+
+
+Dashboard URL (local)
+---------------------
+http://127.0.0.1:5556
+
+Bot health URL (VPS)
+--------------------
+http://127.0.0.1:5557/health
+
+
+Useful one-liners
+-----------------
+# Restart + health in one go
+cd /opt/trading-bot/BTC_Algo && git pull && sudo systemctl restart btc-fvg-bot.service && sleep 5 && curl http://127.0.0.1:5557/health
+
+# Watch only heartbeat/no-setup lines
+tail -f logs/fvg_paper_bot.log | grep -iE "heartbeat|no setup|new tight|telegram notification"
