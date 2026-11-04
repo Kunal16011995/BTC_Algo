@@ -149,7 +149,9 @@ monitoring of that port.
 ## Notifications (Telegram / Email)
 
 The bot can send alerts on every **entry**, **SL trail**, **TP hit**, and **SL hit**
-for both live and paper trades.
+for both live and paper trades. It also sends a periodic **heartbeat** status
+message (default every 15 minutes) so you know the bot is still alive and
+scanning M15 bars even when no trades are placed.
 
 1. Copy `.env.example` to `.env` and fill in either Telegram or SMTP details:
 
@@ -162,7 +164,14 @@ for both live and paper trades.
    To get your chat ID, message [@userinfobot](https://t.me/userinfobot) or open
    `https://api.telegram.org/bot<token>/getUpdates` after messaging your bot.
 
-2. Restart the bot:
+2. Adjust the heartbeat interval if desired (default 900 seconds = 15 minutes,
+   set to `0` to disable):
+
+   ```bash
+   HEARTBEAT_INTERVAL_SECONDS=900
+   ```
+
+3. Restart the bot:
 
    ```bash
    sudo systemctl restart btc-fvg-bot.service

@@ -740,6 +740,51 @@ def _start_health_server():
     log.info("Health endpoint running on http://127.0.0.1:%s/health", HEALTH_PORT)
 
 
+def _heartbeat_loop(interval_seconds: int) -> None:
+    """Send a periodic status notification so the operator knows the bot is alive."""
+    # Wait one full interval before the first heartbeat so we do not spam on
+    # a quick restart.
+    time.sleep(interval_seconds)
+    while True:
+        try:
+            open_paper = sum(len(v) for v in _state.get("open_trades", {}).values())
+            open_live = len(_state.get("open_live_trades", []))
+            last_ts = _state.get("last_processed_ts", "None")
+            equity = _state.get("capital", {})
+            equity_str = ", ".join(
+                f"{k}: ${v:,.2f}" for k, v in equity.items()
+            )
+            notify.send(
+                f"<b>FVG Bot Heartbeat</b>\n"
+                f"Status: OK\n"
+                f"Time (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"Last processed bar: {last_ts}\n"
+                f"Open paper trades: {open_paper}\n"
+                f"Open live trades: {open_live}\n"
+                f"Equity: {equity_str or 'n/a'}",
+                subject="FVG Bot Heartbeat OK",
+            )
+            log.info("Heartbeat notification sent")
+        except Exception as exc:
+            log.warning("Heartbeat notification failed: %s", exc)
+        time.sleep(interval_seconds)
+
+
+def _start_heartbeat() -> None:
+    interval = getattr(config, "HEARTBEAT_INTERVAL_SECONDS", 900)
+    if interval <= 0:
+        log.info("Heartbeat notifications disabled (interval=%s)", interval)
+        return
+    thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(interval,),
+        daemon=True,
+        name="fvg-heartbeat",
+    )
+    thread.start()
+    log.info("Heartbeat notifications every %s seconds", interval)
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -832,6 +877,7 @@ def main():
             store.append_variant_equity_point(variant, now_ts, capital[variant])
 
     _state["running"] = True
+    _start_heartbeat()
 
     # Sleep until just after the next 15-minute bar boundary (+ offset).
     # At that moment the previous M15 bar has just closed and is safe to process.

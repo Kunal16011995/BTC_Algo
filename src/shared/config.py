@@ -48,3 +48,6 @@ EMAIL_SMTP_USER = os.getenv('EMAIL_SMTP_USER', '')
 EMAIL_SMTP_PASSWORD = os.getenv('EMAIL_SMTP_PASSWORD', '')
 EMAIL_FROM = os.getenv('EMAIL_FROM', '')
 EMAIL_TO = os.getenv('EMAIL_TO', '')
+
+# --- Heartbeat notifications ---
+HEARTBEAT_INTERVAL_SECONDS = int(os.getenv('HEARTBEAT_INTERVAL_SECONDS', '900'))
