@@ -695,6 +695,13 @@ def _seconds_to_next_bar(interval_min: int = 15, offset_sec: int = 5) -> float:
     return max(0.0, next_bar - now)
 
 
+def _seconds_to_next_boundary(interval_seconds: int) -> float:
+    """Seconds until the next wall-clock boundary of the given interval."""
+    now = datetime.now(timezone.utc).timestamp()
+    next_boundary = ((int(now) // interval_seconds) + 1) * interval_seconds
+    return max(0.0, next_boundary - now)
+
+
 # ---------------------------------------------------------------------------
 # Health-check HTTP server
 # ---------------------------------------------------------------------------
@@ -741,10 +748,12 @@ def _start_health_server():
 
 
 def _heartbeat_loop(interval_seconds: int) -> None:
-    """Send a periodic status notification so the operator knows the bot is alive."""
-    # Wait one full interval before the first heartbeat so we do not spam on
-    # a quick restart.
-    time.sleep(interval_seconds)
+    """Send a periodic status notification aligned to wall-clock boundaries."""
+    # Align the first heartbeat to the next clock boundary (e.g. 12:15, 12:30)
+    # so heartbeats fire on regular clock intervals, not restart-relative times.
+    sleep_s = _seconds_to_next_boundary(interval_seconds)
+    log.info("First heartbeat in %.1f seconds (aligned to clock boundary)", sleep_s)
+    time.sleep(sleep_s)
     while True:
         try:
             open_paper = sum(len(v) for v in _state.get("open_trades", {}).values())
@@ -767,7 +776,7 @@ def _heartbeat_loop(interval_seconds: int) -> None:
             log.info("Heartbeat notification sent")
         except Exception as exc:
             log.warning("Heartbeat notification failed: %s", exc)
-        time.sleep(interval_seconds)
+        time.sleep(_seconds_to_next_boundary(interval_seconds))
 
 
 def _start_heartbeat() -> None:
