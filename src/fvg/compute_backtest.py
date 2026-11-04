@@ -158,9 +158,13 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
     print(f"Running backtest for variant: {variant} ...")
     t0 = time.time()
 
-    # Fetch as much history as Bybit allows. Start from 2020-03-25; earlier
-    # dates can cause Bybit public kline service errors.
-    default_start_ms = int(datetime(2020, 3, 25, tzinfo=timezone.utc).timestamp() * 1000)
+    # Default start date: 2025-01-01.  This keeps daily dashboard updates fast
+    # while still providing enough history for the strategy to warm up its HTF
+    # levels.  Override with BACKTEST_START_DATE=2020-03-25 if you ever need a
+    # full historical rebuild (one-time, slower).
+    start_date_str = os.getenv("BACKTEST_START_DATE", "2025-01-01")
+    start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    default_start_ms = int(start_dt.timestamp() * 1000)
 
     df5 = _load_or_update_klines(client, "BTCUSDT", "15", CACHE_M15_PATH, default_start_ms)
     df1h = _load_or_update_klines(client, "BTCUSDT", "60", CACHE_H1_PATH, default_start_ms)
