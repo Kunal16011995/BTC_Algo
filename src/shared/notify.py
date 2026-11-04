@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import smtplib
 import time
 from email.mime.text import MIMEText
@@ -41,17 +42,20 @@ def _send_telegram(msg: str) -> bool:
         "disable_web_page_preview": True,
     }
     last_exc: Exception | None = None
-    for attempt in range(1, 4):
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
         try:
-            resp = _telegram_session.post(url, json=payload, timeout=15)
+            resp = _telegram_session.post(url, json=payload, timeout=30)
             resp.raise_for_status()
             return True
         except Exception as exc:
             last_exc = exc
-            log.warning("Telegram send attempt %s/3 failed: %s", attempt, exc)
-            if attempt < 3:
-                time.sleep(2 ** attempt)  # 2s, 4s backoff
-    log.warning("Telegram notification failed after 3 attempts: %s", last_exc)
+            log.warning("Telegram send attempt %s/%s failed: %s", attempt, max_retries, exc)
+            if attempt < max_retries:
+                # Exponential backoff 2s, 4s, 8s, 16s plus small jitter.
+                sleep_s = (2 ** attempt) + random.uniform(0, 1)
+                time.sleep(sleep_s)
+    log.warning("Telegram notification failed after %s attempts: %s", max_retries, last_exc)
     return False
 
 
