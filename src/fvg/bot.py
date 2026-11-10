@@ -192,7 +192,12 @@ def _klines_to_df(rows: list) -> pd.DataFrame:
 
 
 def _fetch_history(interval: str, limit: int) -> pd.DataFrame:
-    rows = client.get_klines(SYMBOL, interval, limit=limit)
+    # Use the demo host for historical klines so the bot's M15/H1 data matches
+    # the backtest (which also fetches from the demo host). The public host can
+    # have small timestamp/price differences that cause HTF level mismatches.
+    rows = client.get_klines(
+        SYMBOL, interval, limit=limit, base_url=config.BYBIT_DEMO_BASE_URL
+    )
     return _klines_to_df(rows)
 
 
