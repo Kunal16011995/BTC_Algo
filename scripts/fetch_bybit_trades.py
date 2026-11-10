@@ -25,8 +25,17 @@ from src.shared import config
 from src.shared.bybit_client import BybitClient
 
 
-def _side_from_order_type(order_type: str) -> str:
-    return "BUY" if order_type.upper().startswith("BUY") else "SELL"
+def _side_from_record(r: dict) -> str:
+    # Prefer the explicit side field; fall back to deriving from PnL direction.
+    side = (r.get("side") or "").upper()
+    if side in ("BUY", "SELL"):
+        return side
+    entry = float(r.get("avgEntryPrice", 0) or 0)
+    exit_ = float(r.get("avgExitPrice", 0) or 0)
+    pnl = float(r.get("closedPnl", 0) or 0)
+    if entry == 0 or exit_ == 0:
+        return "BUY"
+    return "BUY" if (exit_ > entry) == (pnl > 0) else "SELL"
 
 
 def _points(entry: float, exit: float, side: str) -> float:
@@ -52,7 +61,7 @@ def fetch_bybit_trades(symbol: str = "BTCUSDT", days: int | None = None):
 
     trades = []
     for r in records:
-        side = _side_from_order_type(r.get("orderType", ""))
+        side = _side_from_record(r)
         qty = float(r.get("qty", 0) or 0)
         entry = float(r.get("avgEntryPrice", 0) or 0)
         exit_ = float(r.get("avgExitPrice", 0) or 0)
