@@ -17,6 +17,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Allow running the script directly from the project root without setting PYTHONPATH.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.shared import config
 from src.shared.bybit_client import BybitClient
 
