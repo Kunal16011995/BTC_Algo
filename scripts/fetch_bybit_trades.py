@@ -26,10 +26,8 @@ from src.shared.bybit_client import BybitClient
 
 
 def _side_from_record(r: dict) -> str:
-    # Prefer the explicit side field; fall back to deriving from PnL direction.
-    side = (r.get("side") or "").upper()
-    if side in ("BUY", "SELL"):
-        return side
+    # Derive side from PnL direction. Bybit's closed-PnL side field is
+    # unreliable, but entry/exit prices + realized PnL always tell the truth.
     entry = float(r.get("avgEntryPrice", 0) or 0)
     exit_ = float(r.get("avgExitPrice", 0) or 0)
     pnl = float(r.get("closedPnl", 0) or 0)
