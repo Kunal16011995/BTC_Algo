@@ -191,13 +191,22 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
         last_old_ts_ms = existing["_last_ts"]
         # Fetch enough history before the last old trade so HTF levels warm up.
         fetch_start_ms = max(0, last_old_ts_ms - lookback_ms)
-        run_capital = float(existing["kpis"]["final_equity"])
-        print(f"Extending existing backtest from ts={last_old_ts_ms} with capital ${run_capital:,.2f}")
+        # IMPORTANT: keep position sizing fixed at the original trading capital,
+        # exactly like the live bot. The accumulated equity only shifts the
+        # equity curve, it does NOT scale position size.
+        old_final_equity = float(existing["kpis"]["final_equity"])
+        run_capital = capital
+        equity_shift = old_final_equity - capital
+        print(f"Extending existing backtest from ts={last_old_ts_ms}")
+        print(f"  old final equity: ${old_final_equity:,.2f}")
+        print(f"  sizing capital (fixed): ${run_capital:,.2f}")
+        print(f"  equity curve shift: ${equity_shift:,.2f}")
     else:
         start_date_str = os.getenv("BACKTEST_START_DATE", "2025-01-01")
         start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         fetch_start_ms = int(start_dt.timestamp() * 1000)
         run_capital = capital
+        equity_shift = 0.0
         print(f"Building backtest from {start_date_str} with capital ${run_capital:,.2f}")
 
     now_ms = int(time.time() * 1000)
@@ -236,8 +245,10 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
     new_equity_df = result["equity"]
     new_trades_df = result["trades"]
 
+    # Shift the new equity curve so it is continuous with the old one while
+    # keeping position sizing fixed at the original trading capital.
     new_equity_points = [
-        [int(ts.timestamp()), float(eq)]
+        [int(ts.timestamp()), float(eq) + equity_shift]
         for ts, eq in zip(new_equity_df["timestamp"], new_equity_df["equity"])
     ]
     new_trades = [_build_trade_dict(row, variant) for _, row in new_trades_df.iterrows()]
