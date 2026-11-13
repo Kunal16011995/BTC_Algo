@@ -271,8 +271,8 @@ class BybitClient:
             body['activePrice'] = _fmt(active_price)
         return self._request('POST', '/v5/order/create', self.demo_base_url, body=body)['result']
 
-    def set_trading_stop(self, symbol, stop_loss=None, trailing_stop=None, active_price=None):
-        """Attach/update a server-side stop-loss or trailing stop on the open position."""
+    def set_trading_stop(self, symbol, stop_loss=None, take_profit=None, trailing_stop=None, active_price=None):
+        """Attach/update a server-side stop-loss, take-profit or trailing stop on the open position."""
         body = {
             'category': 'linear',
             'symbol': symbol,
@@ -281,6 +281,9 @@ class BybitClient:
         if stop_loss is not None:
             body['stopLoss'] = f'{stop_loss:f}'.rstrip('0').rstrip('.') if isinstance(stop_loss, float) else str(stop_loss)
             body['slTriggerBy'] = 'LastPrice'
+        if take_profit is not None:
+            body['takeProfit'] = f'{take_profit:f}'.rstrip('0').rstrip('.') if isinstance(take_profit, float) else str(take_profit)
+            body['tpTriggerBy'] = 'LastPrice'
         if trailing_stop is not None:
             body['trailingStop'] = f'{trailing_stop:f}'.rstrip('0').rstrip('.') if isinstance(trailing_stop, float) else str(trailing_stop)
         if active_price is not None:

@@ -1,6 +1,7 @@
 """Simple notification dispatcher (Telegram + optional email)."""
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -134,9 +135,13 @@ def _send_telegram(msg: str) -> bool:
         return False
     _start_cleanup_thread()
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # Telegram HTML parse mode rejects unescaped '<', '>' or '&'.  Escape the
+    # whole text, then restore the explicit <b> tags we use for formatting.
+    safe_msg = html.escape(msg)
+    safe_msg = safe_msg.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": msg,
+        "text": safe_msg,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }

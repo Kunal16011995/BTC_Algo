@@ -287,11 +287,8 @@ def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_
             variant, side, qty, setup.entry_price, setup.stop_price,
             setup.runner_max_price, setup.tp1_price, trail_dist, order_id,
         )
-        notify.notify_entry(
-            variant, side, qty, setup.entry_price, setup.stop_price,
-            setup.tp1_price, setup.runner_max_price, live=True,
-        )
-        return {
+
+        trade = {
             "order_id": order_id,
             "variant": variant,
             "side": side,
@@ -306,6 +303,21 @@ def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_
             "extreme_price": setup.entry_price,
             "current_sl": setup.stop_price,
         }
+
+        # Defensive: ensure the server-side hard SL/TP are actually attached.
+        # Bybit normally honours them, but if anything goes wrong we do not
+        # want an unprotected position left open.
+        _ensure_live_position_sltp(trade)
+
+        try:
+            notify.notify_entry(
+                variant, side, qty, setup.entry_price, setup.stop_price,
+                setup.tp1_price, setup.runner_max_price, live=True,
+            )
+        except Exception as exc:
+            log.warning("LIVE %s entry notification failed (trade is still tracked): %s", variant, exc)
+
+        return trade
     except Exception as exc:
         log.exception("LIVE %s order failed: %s", variant, exc)
         return None
@@ -461,6 +473,75 @@ def _close_live_position_immediately(trade: dict, reason: str):
     except Exception as exc:
         log.warning("LIVE %s immediate close failed: %s", trade.get("variant"), exc)
         return False
+
+
+def _close_orphan_live_position() -> bool:
+    """Close a live Bybit position that has no local tracker.
+
+    This guards against positions left behind by crashes, failed tracker saves,
+    or code changes that cleared open_live_trades while a position was open.
+    """
+    try:
+        pos = client.get_position(SYMBOL)
+        size = float(pos.get("size", 0) or 0)
+        if size <= 0:
+            return True
+        side = pos.get("side", "")
+        close_side = "Sell" if side == "Buy" else "Buy"
+        log.warning(
+            "ORPHAN live position detected (%s %.3f BTC) with no tracker; closing at market",
+            side, size,
+        )
+        result = client.place_market_order(SYMBOL, close_side, size)
+        log.info(
+            "Closed orphan live position | side=%s qty=%.3f orderId=%s",
+            close_side, size, result.get("orderId"),
+        )
+        return True
+    except Exception as exc:
+        log.exception("Failed to close orphan live position: %s", exc)
+        return False
+
+
+def _ensure_live_position_sltp(trade: dict, max_retries: int = 3) -> bool:
+    """Verify the live position has the hard SL/TP attached; set them if missing."""
+    for attempt in range(max_retries):
+        try:
+            pos = client.get_position(SYMBOL)
+            if not pos or float(pos.get("size", 0) or 0) == 0:
+                if attempt < max_retries - 1:
+                    time.sleep(0.5)
+                    continue
+                log.warning(
+                    "LIVE %s position not found after entry; cannot verify SL/TP",
+                    trade.get("variant"),
+                )
+                return False
+
+            has_sl = bool(pos.get("stopLoss"))
+            has_tp = bool(pos.get("takeProfit"))
+            if not has_sl or not has_tp:
+                log.warning(
+                    "LIVE %s position missing SL/TP (sl=%s tp=%s); setting hard SL/TP now",
+                    trade.get("variant"), has_sl, has_tp,
+                )
+                client.set_trading_stop(
+                    SYMBOL,
+                    stop_loss=trade["stop_price"],
+                    take_profit=trade["runner_max_price"],
+                )
+                log.info(
+                    "LIVE %s hard SL/TP set | sl=%.2f tp=%.2f",
+                    trade.get("variant"), trade["stop_price"], trade["runner_max_price"],
+                )
+            return True
+        except Exception as exc:
+            log.warning(
+                "LIVE %s SL/TP verification attempt %d/%d failed: %s",
+                trade.get("variant"), attempt + 1, max_retries, exc,
+            )
+            time.sleep(0.5)
+    return False
 
 
 def _match_live_trade(closed_row: dict, open_trades: list[dict]) -> dict | None:
@@ -862,21 +943,37 @@ def main():
         # clearing stale trackers, otherwise missed closed-PnL is lost forever.
         _sync_live_closed_pnl(open_live_trades, capital, daily_pnl)
         _save_open_live_trades(open_live_trades)
-        # Only clear unmatched trackers if Bybit confirms the position is flat.
-        if open_live_trades:
-            try:
-                pos = client.get_position(SYMBOL)
-                if pos and abs(float(pos.get("size", 0) or 0)) == 0:
-                    log.warning(
-                        "Bybit reports no open position but %s live trade(s) were still tracked after sync; clearing stale tracker.",
-                        len(open_live_trades),
-                    )
-                    open_live_trades = []
-                    _save_open_live_trades(open_live_trades)
-            except Exception as exc:
-                log.warning("Could not verify live position at startup: %s", exc)
+        # Reconcile tracker vs Bybit position in both directions.
+        try:
+            pos = client.get_position(SYMBOL)
+            pos_size = abs(float(pos.get("size", 0) or 0)) if pos else 0.0
+            if open_live_trades and pos_size == 0:
+                log.warning(
+                    "Bybit reports no open position but %s live trade(s) were still tracked after sync; clearing stale tracker.",
+                    len(open_live_trades),
+                )
+                open_live_trades = []
+                _save_open_live_trades(open_live_trades)
+            elif not open_live_trades and pos_size > 0:
+                log.warning(
+                    "Bybit shows an open position (%.3f BTC) but no live trades are tracked; treating as orphan.",
+                    pos_size,
+                )
+                _close_orphan_live_position()
+        except Exception as exc:
+            log.warning("Could not reconcile live position at startup: %s", exc)
     else:
         log.info("No open live trades loaded")
+        # Even with an empty tracker, an existing Bybit position is dangerous; close it.
+        try:
+            pos = client.get_position(SYMBOL)
+            if pos and abs(float(pos.get("size", 0) or 0)) > 0:
+                log.warning(
+                    "Bybit shows an open position with no tracked live trades; treating as orphan at startup.",
+                )
+                _close_orphan_live_position()
+        except Exception as exc:
+            log.warning("Could not check for orphan live position at startup: %s", exc)
 
     last_processed_ts: pd.Timestamp | None = None
 
@@ -1003,17 +1100,29 @@ def main():
 
                         if variant in LIVE_VARIANTS:
                             # Only one live position per symbol in one-way mode
-                            if any(t.get("variant") == variant for t in open_live_trades):
-                                log.debug("%s already has an open live position; skipping", variant)
-                                continue
+                            has_tracker = any(t.get("variant") == variant for t in open_live_trades)
                             try:
                                 pos = client.get_position(SYMBOL)
-                                if pos and abs(float(pos.get("size", 0) or 0)) > 0:
-                                    log.debug("%s live position already open on Bybit; skipping", variant)
-                                    continue
+                                pos_size = abs(float(pos.get("size", 0) or 0)) if pos else 0.0
                             except Exception as exc:
                                 log.warning("Could not check %s position: %s", variant, exc)
                                 continue
+
+                            if pos_size > 0:
+                                if not has_tracker:
+                                    log.warning(
+                                        "%s live position exists on Bybit (%.3f BTC) but is not tracked; closing orphan",
+                                        variant, pos_size,
+                                    )
+                                    _close_orphan_live_position()
+                                else:
+                                    log.debug("%s live position already open on Bybit; skipping", variant)
+                                continue
+
+                            if has_tracker:
+                                log.debug("%s already has an open live position tracked; skipping", variant)
+                                continue
+
                             live_trade = _place_live_trade(
                                 variant, setup, capital[variant], qty_step, min_qty
                             )
