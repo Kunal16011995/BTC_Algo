@@ -367,7 +367,14 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
     o, h, l, c = latest_bar["open"], latest_bar["high"], latest_bar["low"], latest_bar["close"]
     bar_ts = latest_bar["timestamp"]
 
+    keep: list[dict] = []
     for trade in open_live_trades:
+        # Trades we already market-closed must stay in the list until Bybit's
+        # closed-PnL record is matched, but they must not be managed any further.
+        if trade.get("pending_close"):
+            keep.append(trade)
+            continue
+
         side = trade.get("side", "")
         entry = float(trade.get("entry_price", 0.0))
         stop = float(trade.get("stop_price", 0.0))
@@ -378,6 +385,7 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
         current_sl = float(trade.get("current_sl", stop))
 
         if entry == 0.0 or stop == 0.0 or tp1 == 0.0:
+            keep.append(trade)
             continue
 
         is_long = side == "Buy"
@@ -433,7 +441,9 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
                             "LIVE %s trailing SL already hit (last=%.2f, sl=%.2f); closing immediately",
                             trade.get("variant"), last_price, current_sl,
                         )
-                        _close_live_position_immediately(trade, "trail_1r_immediate")
+                        if _close_live_position_immediately(trade, "trail_1r_immediate"):
+                            keep.append(trade)
+                            continue
                     else:
                         old_sl = float(trade.get("current_sl", current_sl))
                         client.set_trading_stop(SYMBOL, stop_loss=current_sl)
@@ -455,9 +465,17 @@ def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series
                     )
             trade["current_sl"] = current_sl
 
+        keep.append(trade)
+
+    open_live_trades[:] = keep
+
 
 def _close_live_position_immediately(trade: dict, reason: str):
-    """Close a live position at market when the trailing SL is already hit."""
+    """Close a live position at market when the trailing SL is already hit.
+
+    Marks the trade as pending_close so the trailing-SL loop stops managing it
+    and so it can be reconciled against Bybit closed-PnL on the next bar.
+    """
     side = trade.get("side", "")
     qty = float(trade.get("qty", 0) or 0)
     if qty <= 0:
@@ -465,6 +483,10 @@ def _close_live_position_immediately(trade: dict, reason: str):
     close_side = "Sell" if side == "Buy" else "Buy"
     try:
         result = client.place_market_order(SYMBOL, close_side, qty)
+        trade["pending_close"] = True
+        trade["close_order_id"] = result.get("orderId")
+        trade["close_reason"] = reason
+        trade["close_ts_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
         log.info(
             "LIVE %s position closed immediately | side=%s qty=%.3f reason=%s orderId=%s",
             trade.get("variant"), close_side, qty, reason, result.get("orderId"),
@@ -547,10 +569,12 @@ def _ensure_live_position_sltp(trade: dict, max_retries: int = 3) -> bool:
 def _match_live_trade(closed_row: dict, open_trades: list[dict]) -> dict | None:
     """Find the open live trade that corresponds to a closed-PnL row.
 
-    Bybit gives the SL/TP fill a different orderId than the original market
-    order, so we match by quantity, entry price, and opposite closing side.
+    Prefer an exact match on the close order ID we stored when the bot
+    market-closed the position immediately. Fallback to quantity + entry price
+    + opposite closing side for SL/TP fills where Bybit uses a different orderId.
     """
     try:
+        close_order_id = closed_row.get("orderId", "")
         close_side = closed_row.get("side", "")
         qty = float(closed_row.get("qty", 0) or 0)
         entry_price = float(closed_row.get("avgEntryPrice", 0) or 0)
@@ -559,7 +583,11 @@ def _match_live_trade(closed_row: dict, open_trades: list[dict]) -> dict | None:
         return None
 
     for trade in open_trades:
-        # Closing side must be opposite of opening side
+        # Exact match when we ourselves issued the closing market order
+        if close_order_id and trade.get("close_order_id") == close_order_id:
+            return trade
+
+        # Fallback: closing side must be opposite of opening side
         if trade.get("side") == "Buy" and close_side != "Sell":
             continue
         if trade.get("side") == "Sell" and close_side != "Buy":
