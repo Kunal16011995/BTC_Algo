@@ -28,7 +28,10 @@ class BybitClient:
         self.demo_base_url = demo_base_url.rstrip('/')
         self.public_base_url = public_base_url.rstrip('/')
         self.max_rate_limit_retries = 6
-        self.recv_window = '5000'
+        # A wider recv_window tolerates VPS clock drift relative to Bybit.
+        # 30s is still safe and prevents timestamp-drift rejects when the
+        # server clock is a few seconds ahead of the VPS clock.
+        self.recv_window = '30000'
         self.session = requests.Session()
         # Bybit's CDN rejects the default python-requests User-Agent with a
         # non-JSON error page on some public endpoints.
