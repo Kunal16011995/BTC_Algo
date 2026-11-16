@@ -259,11 +259,12 @@ def _create_trade(variant: str, setup, capital: float, qty_step: float, min_qty:
 
 
 def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_qty: float) -> dict | None:
-    """Place a real Bybit demo market order with hard SL + hard runner TP.
+    """Place a GTC limit order at the FVG midpoint with hard SL + runner TP.
 
-    The trailing stop is managed manually in-code after TP1 is hit, so no
-    server-side trailing stop is attached at entry.
-    Returns a dict with trade details if successful, else None.
+    The live bot now matches the profitable backtest assumption: enter at the
+    FVG midpoint via a limit order. The order remains active until filled or
+    until its TTL expires. Once filled, the position tracker takes over.
+    Returns a pending-order dict if successful, else None.
     """
     size_usd, qty = _compute_size(setup.entry_price, setup.stop_price, capital, qty_step, min_qty)
     if size_usd is None:
@@ -271,43 +272,22 @@ def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_
         return None
 
     side = "Buy" if setup.direction == Direction.LONG else "Sell"
-    trail_dist = abs(setup.entry_price - setup.tp1_price)
     try:
-        result = client.place_market_order(
+        result = client.place_limit_order(
             SYMBOL,
             side,
             qty,
+            setup.entry_price,
             stop_loss=setup.stop_price,
             take_profit=setup.runner_max_price,
         )
         order_id = result.get("orderId")
 
         log.info(
-            "LIVE %s order placed | side=%s qty=%.3f entry=%.2f stop=%.2f runner=%.2f tp1=%.2f trail=%.2f orderId=%s",
+            "LIVE %s limit order placed | side=%s qty=%.3f limit=%.2f stop=%.2f runner=%.2f tp1=%.2f orderId=%s",
             variant, side, qty, setup.entry_price, setup.stop_price,
-            setup.runner_max_price, setup.tp1_price, trail_dist, order_id,
+            setup.runner_max_price, setup.tp1_price, order_id,
         )
-
-        trade = {
-            "order_id": order_id,
-            "variant": variant,
-            "side": side,
-            "qty": qty,
-            "entry_price": setup.entry_price,
-            "entry_ts_ms": int(setup.timestamp.timestamp() * 1000),
-            "stop_price": setup.stop_price,
-            "tp1_price": setup.tp1_price,
-            "runner_max_price": setup.runner_max_price,
-            "trail_dist": trail_dist,
-            "tp1_hit": False,
-            "extreme_price": setup.entry_price,
-            "current_sl": setup.stop_price,
-        }
-
-        # Defensive: ensure the server-side hard SL/TP are actually attached.
-        # Bybit normally honours them, but if anything goes wrong we do not
-        # want an unprotected position left open.
-        _ensure_live_position_sltp(trade)
 
         try:
             notify.notify_entry(
@@ -315,11 +295,22 @@ def _place_live_trade(variant: str, setup, capital: float, qty_step: float, min_
                 setup.tp1_price, setup.runner_max_price, live=True,
             )
         except Exception as exc:
-            log.warning("LIVE %s entry notification failed (trade is still tracked): %s", variant, exc)
+            log.warning("LIVE %s entry notification failed (order is still tracked): %s", variant, exc)
 
-        return trade
+        return {
+            "order_id": order_id,
+            "variant": variant,
+            "side": side,
+            "qty": qty,
+            "limit_price": setup.entry_price,
+            "setup_ts_ms": int(setup.timestamp.timestamp() * 1000),
+            "stop_price": setup.stop_price,
+            "tp1_price": setup.tp1_price,
+            "runner_max_price": setup.runner_max_price,
+            "bars_remaining": COMMON_PARAMS.get("fvg_lookforward", 8),
+        }
     except Exception as exc:
-        log.exception("LIVE %s order failed: %s", variant, exc)
+        log.exception("LIVE %s limit order failed: %s", variant, exc)
         return None
 
 
@@ -352,6 +343,123 @@ def _load_open_live_trades() -> list[dict]:
 
 def _save_open_live_trades(trades: list[dict]):
     store.set_meta("open_live_trades", json.dumps(trades, default=str))
+
+
+# ---------------------------------------------------------------------------
+# Pending limit-order management
+# ---------------------------------------------------------------------------
+def _load_pending_orders() -> list[dict]:
+    """Load limit orders that have been placed but not yet filled."""
+    raw = store.get_meta("pending_live_orders", "")
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+def _save_pending_orders(orders: list[dict]):
+    store.set_meta("pending_live_orders", json.dumps(orders, default=str))
+
+
+def _create_live_trade_from_fill(pending: dict, fill_info: dict) -> dict:
+    """Build a live trade tracker from a filled limit order."""
+    side = pending["side"]
+    qty = float(pending["qty"])
+    entry_price = float(fill_info.get("avgPrice", pending.get("limit_price", 0)) or 0)
+    entry_ts_ms = int(fill_info.get("updatedTime", 0) or 0)
+    if entry_ts_ms == 0:
+        entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    tp1 = float(pending.get("tp1_price", entry_price))
+    return {
+        "order_id": pending.get("order_id"),
+        "variant": pending.get("variant"),
+        "side": side,
+        "qty": qty,
+        "entry_price": entry_price,
+        "entry_ts_ms": entry_ts_ms,
+        "stop_price": float(pending.get("stop_price", 0)),
+        "tp1_price": tp1,
+        "runner_max_price": float(pending.get("runner_max_price", 0)),
+        "trail_dist": abs(entry_price - tp1),
+        "tp1_hit": False,
+        "extreme_price": entry_price,
+        "current_sl": float(pending.get("stop_price", 0)),
+    }
+
+
+def _check_pending_orders(pending_orders: list[dict], open_live_trades: list[dict]):
+    """Poll pending limit orders: promote fills to live trades, cancel stale ones."""
+    if not pending_orders:
+        return
+
+    try:
+        open_order_ids = {o.get("orderId") for o in client.get_open_orders(SYMBOL)}
+    except Exception as exc:
+        log.warning("Could not fetch open orders for pending check: %s", exc)
+        return
+
+    keep: list[dict] = []
+    for pending in pending_orders:
+        order_id = pending.get("order_id")
+        variant = pending.get("variant", "")
+
+        # If it is still in the open-order book, just decrement TTL.
+        if order_id in open_order_ids:
+            pending["bars_remaining"] = int(pending.get("bars_remaining", 1)) - 1
+            if pending["bars_remaining"] <= 0:
+                try:
+                    client.cancel_order(SYMBOL, order_id)
+                    log.info("LIVE %s pending limit order expired and cancelled | orderId=%s", variant, order_id)
+                except Exception as exc:
+                    log.warning("LIVE %s could not cancel expired pending order %s: %s", variant, order_id, exc)
+                    keep.append(pending)
+                continue
+            keep.append(pending)
+            continue
+
+        # Not in open orders: either filled, cancelled externally, or rejected.
+        try:
+            order_info = client.get_order(SYMBOL, order_id)
+        except Exception as exc:
+            log.warning("LIVE %s could not query pending order %s: %s", variant, order_id, exc)
+            keep.append(pending)
+            continue
+
+        if not order_info:
+            log.warning("LIVE %s pending order %s not found; dropping from tracker", variant, order_id)
+            continue
+
+        status = order_info.get("orderStatus", "").lower()
+        if status in ("filled", "partiallyfilled"):
+            cum_exec = float(order_info.get("cumExecQty", 0) or 0)
+            qty = float(pending.get("qty", 0) or 0)
+            if cum_exec >= qty - 1e-9:
+                trade = _create_live_trade_from_fill(pending, order_info)
+                open_live_trades.append(trade)
+                _ensure_live_position_sltp(trade)
+                log.info(
+                    "LIVE %s limit order filled | side=%s qty=%.3f entry=%.2f stop=%.2f runner=%.2f orderId=%s",
+                    variant, trade["side"], trade["qty"], trade["entry_price"],
+                    trade["stop_price"], trade["runner_max_price"], order_id,
+                )
+                notify.notify_entry(
+                    variant, trade["side"], trade["qty"], trade["entry_price"],
+                    trade["stop_price"], trade["tp1_price"], trade["runner_max_price"], live=True,
+                )
+            else:
+                log.warning(
+                    "LIVE %s pending order %s only partially filled (%.3f/%.3f); keeping pending",
+                    variant, order_id, cum_exec, qty,
+                )
+                keep.append(pending)
+        elif status in ("cancelled", "rejected", "deactivated"):
+            log.info("LIVE %s pending order %s status=%s; removing from tracker", variant, order_id, status)
+        else:
+            keep.append(pending)
+
+    pending_orders[:] = keep
 
 
 def _update_live_trailing_sl(open_live_trades: list[dict], latest_bar: pd.Series):
@@ -872,6 +980,7 @@ def _heartbeat_loop(interval_seconds: int) -> None:
         try:
             open_paper = sum(len(v) for v in _state.get("open_trades", {}).values())
             open_live = len(_state.get("open_live_trades", []))
+            pending = len(_state.get("pending_orders", []))
             last_ts = _state.get("last_processed_ts", "None")
             equity = _state.get("capital", {})
             equity_str = ", ".join(
@@ -884,6 +993,7 @@ def _heartbeat_loop(interval_seconds: int) -> None:
                 f"Last processed bar: {last_ts}\n"
                 f"Open paper trades: {open_paper}\n"
                 f"Open live trades: {open_live}\n"
+                f"Pending limit orders: {pending}\n"
                 f"Equity: {equity_str or 'n/a'}",
                 subject="FVG Bot Heartbeat OK",
             )
@@ -952,6 +1062,9 @@ def main():
 
     # Track real Bybit demo positions placed by live variants
     open_live_trades: list[dict] = _load_open_live_trades()
+    pending_orders: list[dict] = _load_pending_orders()
+    if pending_orders:
+        log.info("Loaded %s pending live order(s) from previous run", len(pending_orders))
     if open_live_trades:
         log.info("Loaded %s open live trade(s) from previous run", len(open_live_trades))
         for t in open_live_trades:
@@ -1010,6 +1123,7 @@ def main():
     _state["capital"] = capital
     _state["open_trades"] = open_trades
     _state["open_live_trades"] = open_live_trades
+    _state["pending_orders"] = pending_orders
     _start_health_server()
 
     # Seed initial equity snapshots only if the curve is empty
@@ -1091,7 +1205,14 @@ def main():
 
                 # 1b) Record any real Bybit demo trades that closed since last bar
                 _sync_live_closed_pnl(open_live_trades, capital, daily_pnl)
+
+                # 1c) Poll pending limit orders: promote fills to live trades or
+                # cancel expired ones.
+                _check_pending_orders(pending_orders, open_live_trades)
+                _save_pending_orders(pending_orders)
+
                 _state["open_live_trades"] = open_live_trades
+                _state["pending_orders"] = pending_orders
 
                 # 2) Generate new setups that complete on this bar
                 current_day = latest_ts.normalize()
@@ -1127,8 +1248,9 @@ def main():
                         seen.add(sig)
 
                         if variant in LIVE_VARIANTS:
-                            # Only one live position per symbol in one-way mode
+                            # Only one live position + one pending order per variant.
                             has_tracker = any(t.get("variant") == variant for t in open_live_trades)
+                            has_pending = any(o.get("variant") == variant for o in pending_orders)
                             try:
                                 pos = client.get_position(SYMBOL)
                                 pos_size = abs(float(pos.get("size", 0) or 0)) if pos else 0.0
@@ -1151,12 +1273,16 @@ def main():
                                 log.debug("%s already has an open live position tracked; skipping", variant)
                                 continue
 
-                            live_trade = _place_live_trade(
+                            if has_pending:
+                                log.debug("%s already has a pending limit order; skipping", variant)
+                                continue
+
+                            pending = _place_live_trade(
                                 variant, setup, capital[variant], qty_step, min_qty
                             )
-                            if live_trade:
-                                open_live_trades.append(live_trade)
-                                _save_open_live_trades(open_live_trades)
+                            if pending:
+                                pending_orders.append(pending)
+                                _save_pending_orders(pending_orders)
                                 new_setups += 1
                             continue
 

@@ -242,6 +242,9 @@ class BybitClient:
                 return None
             raise
 
+    def _fmt_price(self, val):
+        return f'{val:f}'.rstrip('0').rstrip('.') if isinstance(val, float) else str(val)
+
     def place_market_order(self, symbol, side, qty, stop_loss=None, take_profit=None,
                             trailing_stop=None, active_price=None):
         """side: 'Buy' or 'Sell'. Returns the raw order result.
@@ -250,29 +253,66 @@ class BybitClient:
         server-side in Full tpslMode (whole position). Use active_price to
         activate the trailing stop only after a target is reached.
         """
-        def _fmt(val):
-            return f'{val:f}'.rstrip('0').rstrip('.') if isinstance(val, float) else str(val)
-
         body = {
             'category': 'linear',
             'symbol': symbol,
             'side': side,
             'orderType': 'Market',
-            'qty': _fmt(qty),
+            'qty': self._fmt_price(qty),
             'positionIdx': 0,  # one-way mode
             'tpslMode': 'Full',
         }
         if stop_loss is not None:
-            body['stopLoss'] = _fmt(stop_loss)
+            body['stopLoss'] = self._fmt_price(stop_loss)
             body['slTriggerBy'] = 'LastPrice'
         if take_profit is not None:
-            body['takeProfit'] = _fmt(take_profit)
+            body['takeProfit'] = self._fmt_price(take_profit)
             body['tpTriggerBy'] = 'LastPrice'
         if trailing_stop is not None:
-            body['trailingStop'] = _fmt(trailing_stop)
+            body['trailingStop'] = self._fmt_price(trailing_stop)
         if active_price is not None:
-            body['activePrice'] = _fmt(active_price)
+            body['activePrice'] = self._fmt_price(active_price)
         return self._request('POST', '/v5/order/create', self.demo_base_url, body=body)['result']
+
+    def place_limit_order(self, symbol, side, qty, price, stop_loss=None, take_profit=None,
+                          time_in_force='GTC'):
+        """Place a GTC limit order with optional server-side SL/TP."""
+        body = {
+            'category': 'linear',
+            'symbol': symbol,
+            'side': side,
+            'orderType': 'Limit',
+            'qty': self._fmt_price(qty),
+            'price': self._fmt_price(price),
+            'timeInForce': time_in_force,
+            'positionIdx': 0,
+            'tpslMode': 'Full',
+        }
+        if stop_loss is not None:
+            body['stopLoss'] = self._fmt_price(stop_loss)
+            body['slTriggerBy'] = 'LastPrice'
+        if take_profit is not None:
+            body['takeProfit'] = self._fmt_price(take_profit)
+            body['tpTriggerBy'] = 'LastPrice'
+        return self._request('POST', '/v5/order/create', self.demo_base_url, body=body)['result']
+
+    def get_open_orders(self, symbol):
+        """Return a list of open orders for a symbol."""
+        params = {'category': 'linear', 'symbol': symbol, 'openOnly': 0, 'limit': 50}
+        data = self._request('GET', '/v5/order/realtime', self.demo_base_url, params=params)
+        return data['result']['list']
+
+    def get_order(self, symbol, order_id):
+        """Return a single order by orderId (from order history)."""
+        params = {'category': 'linear', 'symbol': symbol, 'orderId': order_id}
+        data = self._request('GET', '/v5/order/history', self.demo_base_url, params=params)
+        orders = data['result']['list']
+        return orders[0] if orders else None
+
+    def cancel_order(self, symbol, order_id):
+        """Cancel an open order by orderId."""
+        body = {'category': 'linear', 'symbol': symbol, 'orderId': order_id}
+        return self._request('POST', '/v5/order/cancel', self.demo_base_url, body=body)['result']
 
     def set_trading_stop(self, symbol, stop_loss=None, take_profit=None, trailing_stop=None, active_price=None):
         """Attach/update a server-side stop-loss, take-profit or trailing stop on the open position."""
