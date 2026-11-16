@@ -73,7 +73,10 @@ def simulate_trade(
     trailing_stop = None
     extreme_price = entry_price
 
-    for i in range(entry_idx, len(df5)):
+    # The live bot places the market order after the setup bar closes and only
+    # updates the trailing SL once the *next* bar has closed. Mirror that one-bar
+    # delay so exits are checked on the bar after the entry bar, not the entry bar itself.
+    for i in range(entry_idx + 1, len(df5)):
         row = df5.iloc[i]
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
 
