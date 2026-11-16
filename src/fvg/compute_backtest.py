@@ -236,8 +236,10 @@ def _run_variant(client: BybitClient, variant: str, params: dict, capital: float
         fixed_risk_amount=fixed_risk_amount,
         daily_loss_cap_pct=None,
         fixed_daily_loss_cap=fixed_daily_loss_cap,
-        entry_cost_pct=0.0001,
-        exit_cost_pct=0.0006,
+        # Bybit demo/retail taker fee for BTCUSDT linear perp, both sides.
+        # The live bot uses market orders, so 0.055% each leg is realistic.
+        entry_cost_pct=0.00055,
+        exit_cost_pct=0.00055,
         **COMMON_PARAMS,
         **params,
     )

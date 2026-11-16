@@ -50,12 +50,19 @@ def simulate_trade(
         exit_cost_pct = cost_pct
 
     direction = setup.direction
-    entry_price = setup.entry_price
+    # The live bot places a market order after the setup bar closes, so the
+    # realistic fill is the next bar's open, not the FVG midpoint. Keep the
+    # strategy stop/target prices fixed (the bot sets SL/TP at those levels).
+    entry_idx = start_idx + 1
+    if entry_idx >= len(df5):
+        return None
+    entry_price = float(df5["open"].iloc[entry_idx])
+    entry_time = df5["timestamp"].iloc[entry_idx]
     stop_price = setup.stop_price
     tp1_price = setup.tp1_price
     tp2_price = setup.tp2_price
     runner_max = setup.runner_max_price
-    trail_dist = abs(entry_price - tp1_price)  # 1R distance
+    trail_dist = abs(setup.entry_price - tp1_price)  # 1R distance from intended entry
 
     # Cost on entry
     entry_cost = size_usd * entry_cost_pct + cost_per_trade / 2
@@ -66,7 +73,7 @@ def simulate_trade(
     trailing_stop = None
     extreme_price = entry_price
 
-    for i in range(start_idx + 1, len(df5)):
+    for i in range(entry_idx, len(df5)):
         row = df5.iloc[i]
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
 
@@ -155,7 +162,7 @@ def simulate_trade(
     result_r = net_pnl / risk_amount if risk_amount > 0 else 0.0
 
     return Trade(
-        entry_time=setup.timestamp,
+        entry_time=entry_time,
         exit_time=df5["timestamp"].iloc[i],
         direction="long" if direction == Direction.LONG else "short",
         grade=setup.grade.value,
