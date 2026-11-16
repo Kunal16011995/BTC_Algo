@@ -501,3 +501,52 @@ IMPORTANT NOTES
                - Both timeframes drop the current forming bar before use.
              STATUS: Code updated and syntax-checked. Bot must be restarted to
                      pick up the change.
+
+13/11/2026 - Fixed live safety issues (untracked orphan position + missing SL/TP).
+             Root cause: after the bot market-closed a short at 14:00 UTC, the trade
+             stayed in open_live_trades; its trailing SL kept updating and later fired
+             a "close" Buy order that opened a new, unprotected long.
+             Changes:
+               - src/fvg/bot.py: added startup and in-loop orphan-position guards.
+               - src/fvg/bot.py: added post-entry SL/TP verification via set_trading_stop.
+               - src/fvg/bot.py: trades are marked pending_close when immediately closed
+                 so ghost trades are no longer managed.
+               - src/fvg/bot.py: closed-PnL matching now uses the stored close order ID.
+               - src/shared/bybit_client.py: set_trading_stop() accepts take_profit.
+             STATUS: Bot restarted with fixes. Position is flat.
+
+13/11/2026 - Widened Bybit recv_window to tolerate VPS clock drift.
+             src/shared/bybit_client.py: recv_window 5,000 ms -> 30,000 ms.
+             STATUS: Prevents timestamp-drift rejects on the VPS.
+
+13/11/2026 - Fixed Telegram HTML 400 Bad Request.
+             src/shared/notify.py: HTML-escape message text while preserving <b> tags.
+             STATUS: No-setup notifications now send correctly.
+
+13/11/2026 - Added ops tooling.
+             New files: scripts/audit_live_trade.py, scripts/fetch_bybit_trades.py,
+             scripts/query_bot_db.py, docs/BOT_COMMANDS.txt.
+             STATUS: Operational.
+
+16/11/2026 - Switched live bot to limit orders at the FVG midpoint.
+             Changes:
+               - src/fvg/bot.py: _place_live_trade now places a GTC limit order at
+                 setup.entry_price instead of a market order.
+               - src/fvg/bot.py: added pending_live_orders tracker with TTL = 8 bars.
+               - src/shared/bybit_client.py: added place_limit_order, get_open_orders,
+                 get_order, cancel_order.
+             Why: market-order fills were 200-700 points away from the FVG midpoint,
+             turning the +412% limit-order backtest into a ~-90% live result.
+             STATUS: Pushed to GitHub; ready for VPS restart.
+
+16/11/2026 - Rebuilt backtest with limit-order FVG midpoint + 0.055% taker fees.
+             Changes:
+               - src/fvg/backtest.py: entry at FVG midpoint, 0.055% fees both sides.
+               - src/fvg/compute_backtest.py: fees updated to 0.055% both sides.
+             Results on full Bybit history (2020-03-25 -> 2026-11-16):
+               1,561 trades, final equity $473,967.32 (+412.66%), Sharpe 3.71,
+               max drawdown -3.11%, win rate 74.82%, profit factor 2.87.
+             STATUS: Dashboard backtest JSON updated.
+
+16/11/2026 - Added CHANGELOG.md documenting the above, then merged into docs/change_log.txt.
+             STATUS: Single source of truth is docs/change_log.txt.
