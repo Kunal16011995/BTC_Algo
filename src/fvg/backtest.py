@@ -39,8 +39,14 @@ def simulate_trade(
     cost_per_trade: float = 0.0,
     entry_cost_pct: float | None = None,
     exit_cost_pct: float | None = None,
+    fvg_lookforward: int = 8,
 ) -> Trade | None:
-    """Simulate a single setup from entry to exit using 5m data."""
+    """Simulate a single setup from entry to exit using M15 data.
+
+    A limit order is placed at the FVG midpoint when the setup bar closes.
+    It only fills if price touches the midpoint within the next
+    `fvg_lookforward` bars; otherwise the order expires unfilled.
+    """
     if start_idx >= len(df5) - 1:
         return None
 
@@ -50,16 +56,30 @@ def simulate_trade(
         exit_cost_pct = cost_pct
 
     direction = setup.direction
-    # Limit-order assumption: fill at the FVG midpoint once the setup bar has
-    # closed. This is the original strategy assumption and matches a bot that
-    # places a limit order at the FVG midpoint after the bar completes.
     entry_price = setup.entry_price
-    entry_idx = start_idx
     stop_price = setup.stop_price
     tp1_price = setup.tp1_price
     tp2_price = setup.tp2_price
     runner_max = setup.runner_max_price
     trail_dist = abs(entry_price - tp1_price)  # 1R distance
+
+    # Find the first bar within the lookforward window where the limit price
+    # is touched. For a long limit, price must trade at or below the midpoint;
+    # for a short limit, price must trade at or above the midpoint.
+    fill_idx = None
+    max_idx = min(start_idx + 1 + fvg_lookforward, len(df5))
+    for j in range(start_idx + 1, max_idx):
+        row = df5.iloc[j]
+        h, l = row["high"], row["low"]
+        if direction == Direction.LONG and l <= entry_price:
+            fill_idx = j
+            break
+        if direction == Direction.SHORT and h >= entry_price:
+            fill_idx = j
+            break
+
+    if fill_idx is None:
+        return None
 
     # Cost on entry
     entry_cost = size_usd * entry_cost_pct + cost_per_trade / 2
@@ -70,7 +90,7 @@ def simulate_trade(
     trailing_stop = None
     extreme_price = entry_price
 
-    for i in range(start_idx + 1, len(df5)):
+    for i in range(fill_idx, len(df5)):
         row = df5.iloc[i]
         o, h, l, c = row["open"], row["high"], row["low"], row["close"]
 
@@ -187,6 +207,7 @@ def run_backtest(
     entry_cost_pct: float | None = None,
     exit_cost_pct: float | None = None,
     direction_filter=None,
+    fvg_lookforward: int = 8,
     **strategy_kwargs,
 ) -> dict:
     """Run full backtest and return equity curve + trade list + metrics.
@@ -195,7 +216,7 @@ def run_backtest(
     `fixed_risk_amount` (fixed dollar amount, paper style). Same for daily cap.
     Use `entry_cost_pct` / `exit_cost_pct` for asymmetric cost assumptions.
     """
-    setups = generate_setups(df5, df1h, direction_filter=direction_filter, **strategy_kwargs)
+    setups = generate_setups(df5, df1h, direction_filter=direction_filter, fvg_lookforward=fvg_lookforward, **strategy_kwargs)
 
     equity = [capital]
     equity_time = [df5["timestamp"].iloc[0]]
@@ -229,6 +250,7 @@ def run_backtest(
         trade = simulate_trade(
             setup, df5, start_idx, size_usd, cost_pct, cost_per_trade,
             entry_cost_pct=entry_cost_pct, exit_cost_pct=exit_cost_pct,
+            fvg_lookforward=fvg_lookforward,
         )
         if trade is None:
             continue

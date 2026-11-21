@@ -550,3 +550,20 @@ IMPORTANT NOTES
 
 16/11/2026 - Added CHANGELOG.md documenting the above, then merged into docs/change_log.txt.
              STATUS: Single source of truth is docs/change_log.txt.
+
+21/11/2026 - Fixed unrealistic limit-fill assumption in FVG backtest.
+             Root cause: src/fvg/backtest.py assumed every FVG midpoint limit order
+             filled at the midpoint on the next bar, even when price never touched it.
+             The 2026-11-21 03:15 SHORT setup (limit 58517.25) was recorded as a +$2,184
+             winner, but 1-minute data showed price opened at 58233.80 and never came
+             back to the midpoint before the order expired 2 hours later.
+             Changes:
+               - src/fvg/backtest.py: simulate_trade() now scans the next
+                 fvg_lookforward bars and only fills if price touches the limit.
+               - src/fvg/backtest.py: run_backtest() passes fvg_lookforward explicitly.
+             Results after fix (2025-01-01 -> 2026-11-21, tight variant):
+               278 trades, final equity $55,152.70 (-40.31%), Sharpe -2.89,
+               max drawdown -40.99%, win rate dropped sharply.
+             STATUS: Backtest now realistically models limit fills. Strategy is
+                     unprofitable under realistic fill assumptions. Dashboard JSON
+                     regenerated; forward test on VPS remains the authoritative test.
