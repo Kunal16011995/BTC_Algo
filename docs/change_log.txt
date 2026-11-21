@@ -566,6 +566,12 @@ IMPORTANT NOTES
                max drawdown -40.99%, win rate dropped sharply.
              Full-history run (2020-03-25 -> 2026-11-21, maximum Bybit BTCUSDT history):
                1,024 trades, final equity -$4,009.99, Sharpe -0.33, max DD -104.90%.
+             Focused parameter sweep (limit entry at FVG midpoint only):
+               Tested fvg_lookforward [8,16,32,64] x stop_pct/tp1_pct [0.4%,0.8%,1.2%].
+               Best result: lf8_stop1.2%_tp1.2% -> 1,023 trades, final equity $52,792
+               (-42.90%), Sharpe -1.69, max DD -45.82%.
+               No combination was profitable with realistic limit fills.
              STATUS: Backtest now realistically models limit fills. Strategy is
-                     unprofitable under realistic fill assumptions. Dashboard JSON
-                     regenerated; forward test on VPS remains the authoritative test.
+                     unprofitable under realistic fill assumptions across tested
+                     parameters. Dashboard JSON regenerated; forward test on VPS
+                     remains the authoritative test.
