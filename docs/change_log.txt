@@ -564,6 +564,8 @@ IMPORTANT NOTES
              Results after fix (2025-01-01 -> 2026-11-21, tight variant):
                278 trades, final equity $55,152.70 (-40.31%), Sharpe -2.89,
                max drawdown -40.99%, win rate dropped sharply.
+             Full-history run (2020-03-25 -> 2026-11-21, maximum Bybit BTCUSDT history):
+               1,024 trades, final equity -$4,009.99, Sharpe -0.33, max DD -104.90%.
              STATUS: Backtest now realistically models limit fills. Strategy is
                      unprofitable under realistic fill assumptions. Dashboard JSON
                      regenerated; forward test on VPS remains the authoritative test.
