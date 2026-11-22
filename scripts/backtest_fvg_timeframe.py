@@ -1,25 +1,23 @@
-"""Backtest the FVG momentum strategy on different entry timeframes.
+"""Interactive FVG momentum strategy backtest across timeframes.
 
-Run examples:
-    python -m scripts.backtest_fvg_timeframe --timeframe 30m
-    python -m scripts.backtest_fvg_timeframe --timeframe 1h
-    python -m scripts.backtest_fvg_timeframe --timeframe daily
+The script asks for every parameter, runs the backtest with realistic FVG
+midpoint limit fills, prints the results, then asks whether to try another
+parameter set. It keeps looping until the user says no.
 
-Defaults try to keep the spirit of the SSRN paper (5m entry / 1h HTF / 2h FVG
-window / ~0.09% stop) while scaling sensibly to larger timeframes. All
-parameters can be overridden via CLI flags.
+Default start date is 5 years ago from today.
 """
 from __future__ import annotations
 
-import argparse
 import json
+import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from src.fvg.backtest import compute_metrics, run_backtest
+from src.fvg.strategy import Direction
 from src.shared import config
 from src.shared.bybit_client import BybitClient
 
@@ -40,13 +38,50 @@ TIMEFRAME_CONFIG = {
 }
 
 
+def ask(question: str, default: str) -> str:
+    val = input(f"{question} [{default}]: ").strip()
+    return val if val else default
+
+
+def ask_float(question: str, default: float) -> float:
+    while True:
+        val = input(f"{question} [{default}]: ").strip()
+        if not val:
+            return default
+        try:
+            return float(val)
+        except ValueError:
+            print("  Please enter a number.")
+
+
+def ask_int(question: str, default: int) -> int:
+    while True:
+        val = input(f"{question} [{default}]: ").strip()
+        if not val:
+            return default
+        try:
+            return int(val)
+        except ValueError:
+            print("  Please enter an integer.")
+
+
+def ask_choice(question: str, options: list[str], default: str) -> str | None:
+    opts_str = "/".join(options)
+    while True:
+        val = input(f"{question} [{opts_str}] [{default}]: ").strip()
+        if not val:
+            return default if default.lower() != "none" else None
+        if val.lower() == "none":
+            return None
+        if val in options:
+            return val
+        print(f"  Please enter one of: {opts_str} or none")
+
+
 def timeframe_defaults(tf: str) -> dict:
     """Return sensible default parameters scaled from the paper's 5m settings."""
     minutes = TIMEFRAME_CONFIG[tf]["minutes"]
-    # Paper: 24 x 5m bars = 2 hours. Keep a ~2-hour FVG window.
     fvg_lookforward = max(1, round((2 * 60) / minutes))
-    # Paper: ~0.09% stop on 5m. Scale roughly with sqrt(time) so higher TFs are wider.
-    import math
     scale = math.sqrt(minutes / 5)
     stop_pct = 0.0009 * scale
     tp1_pct = stop_pct
@@ -66,8 +101,24 @@ def timeframe_defaults(tf: str) -> dict:
         "htf_proximity_pct": htf_proximity_pct,
         "a_body_threshold": 0.52,
         "a_plus_body_threshold": 0.70,
-        "direction_filter": None,
     }
+
+
+def gather_parameters(defaults: dict) -> dict:
+    """Ask the user for every strategy parameter."""
+    print("\n--- Strategy parameters (press Enter to keep default) ---")
+    params = {}
+    params["fvg_lookforward"] = ask_int("FVG lookforward bars", defaults["fvg_lookforward"])
+    params["stop_pct"] = ask_float("Stop loss % (decimal, e.g. 0.004 = 0.4%)", defaults["stop_pct"])
+    params["tp1_pct"] = ask_float("TP1 % (trail 1:1)", defaults["tp1_pct"])
+    params["tp2_a_pct"] = ask_float("TP2 % for Grade A", defaults["tp2_a_pct"])
+    params["tp2_a_plus_pct"] = ask_float("TP2 % for Grade A+", defaults["tp2_a_plus_pct"])
+    params["runner_a_pct"] = ask_float("Runner max % for Grade A", defaults["runner_a_pct"])
+    params["runner_a_plus_pct"] = ask_float("Runner max % for Grade A+", defaults["runner_a_plus_pct"])
+    params["htf_proximity_pct"] = ask_float("HTF proximity %", defaults["htf_proximity_pct"])
+    params["a_body_threshold"] = ask_float("Grade A body ratio threshold", defaults["a_body_threshold"])
+    params["a_plus_body_threshold"] = ask_float("Grade A+ body ratio threshold", defaults["a_plus_body_threshold"])
+    return params
 
 
 def fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int | None = None) -> pd.DataFrame:
@@ -86,114 +137,73 @@ def fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int | None =
     for col in ["open", "high", "low", "close", "volume", "turnover"]:
         df[col] = df[col].astype(float)
     df = df.sort_values("timestamp").reset_index(drop=True)
-    # Drop the current forming bar to match live/backtest closed-bar logic.
     if len(df) > 1:
         df = df.iloc[:-1].copy().reset_index(drop=True)
     return df
 
 
-def main():
-    parser = argparse.ArgumentParser(description="FVG strategy backtest across timeframes")
-    parser.add_argument("--timeframe", required=True, choices=list(TIMEFRAME_CONFIG.keys()))
-    parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument("--start", default="2020-01-01", help="Start date YYYY-MM-DD")
-    parser.add_argument("--capital", type=float, default=CAPITAL)
-    parser.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
-    parser.add_argument("--entry-fee", type=float, default=0.00055)
-    parser.add_argument("--exit-fee", type=float, default=0.00055)
+def run_one_backtest(tf: str, start_date: str) -> None:
+    tf_cfg = TIMEFRAME_CONFIG[tf]
+    defaults = timeframe_defaults(tf)
 
-    # Strategy parameter overrides
-    parser.add_argument("--fvg-lookforward", type=int, default=None)
-    parser.add_argument("--stop-pct", type=float, default=None)
-    parser.add_argument("--tp1-pct", type=float, default=None)
-    parser.add_argument("--tp2-a-pct", type=float, default=None)
-    parser.add_argument("--tp2-a-plus-pct", type=float, default=None)
-    parser.add_argument("--runner-a-pct", type=float, default=None)
-    parser.add_argument("--runner-a-plus-pct", type=float, default=None)
-    parser.add_argument("--htf-proximity-pct", type=float, default=None)
-    parser.add_argument("--a-body-threshold", type=float, default=None)
-    parser.add_argument("--a-plus-body-threshold", type=float, default=None)
-    parser.add_argument("--session", default=None, choices=[None, "Asia", "London", "NewYork", "Overlap"])
-    parser.add_argument("--direction", default=None, choices=[None, "long", "short"])
+    print("\n============================================")
+    print(f"  FVG backtest: {tf} entry / {tf_cfg['htf_interval']} HTF")
+    print(f"  Data range: {start_date} -> today (~5 years)")
+    print("============================================")
 
-    args = parser.parse_args()
+    params = gather_parameters(defaults)
 
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    session = ask_choice("Session filter", ["Asia", "London", "NewYork", "Overlap"], "none")
+    direction = ask_choice("Direction filter", ["long", "short"], "none")
 
-    tf_cfg = TIMEFRAME_CONFIG[args.timeframe]
-    params = timeframe_defaults(args.timeframe)
-
-    # Apply CLI overrides
-    if args.fvg_lookforward is not None:
-        params["fvg_lookforward"] = args.fvg_lookforward
-    if args.stop_pct is not None:
-        params["stop_pct"] = args.stop_pct
-    if args.tp1_pct is not None:
-        params["tp1_pct"] = args.tp1_pct
-    if args.tp2_a_pct is not None:
-        params["tp2_a_pct"] = args.tp2_a_pct
-    if args.tp2_a_plus_pct is not None:
-        params["tp2_a_plus_pct"] = args.tp2_a_plus_pct
-    if args.runner_a_pct is not None:
-        params["runner_a_pct"] = args.runner_a_pct
-    if args.runner_a_plus_pct is not None:
-        params["runner_a_plus_pct"] = args.runner_a_plus_pct
-    if args.htf_proximity_pct is not None:
-        params["htf_proximity_pct"] = args.htf_proximity_pct
-    if args.a_body_threshold is not None:
-        params["a_body_threshold"] = args.a_body_threshold
-    if args.a_plus_body_threshold is not None:
-        params["a_plus_body_threshold"] = args.a_plus_body_threshold
-    if args.session is not None:
-        params["session_filter"] = args.session
-    if args.direction is not None:
-        from src.fvg.strategy import Direction
-        params["direction_filter"] = Direction.LONG if args.direction == "long" else Direction.SHORT
+    capital = ask_float("Starting capital", CAPITAL)
+    risk_pct = ask_float("Risk per trade % (decimal, e.g. 0.005 = 0.5%)", RISK_PER_TRADE_PCT)
+    entry_fee = ask_float("Entry fee % (decimal, e.g. 0.00055)", 0.00055)
+    exit_fee = ask_float("Exit fee % (decimal, e.g. 0.00055)", 0.00055)
 
     common = {
         "a_body_threshold": params.pop("a_body_threshold"),
         "a_plus_body_threshold": params.pop("a_plus_body_threshold"),
-        "direction_filter": params.pop("direction_filter", None),
+        "direction_filter": Direction.LONG if direction == "long" else (Direction.SHORT if direction == "short" else None),
     }
-    if "session_filter" in params:
-        common["session_filter"] = params.pop("session_filter")
+    if session is not None:
+        common["session_filter"] = session
 
-    print(f"\n=== FVG backtest on {args.timeframe} entry / {tf_cfg['htf_interval']} HTF ===")
-    print(f"Parameters: {json.dumps({**common, **params}, indent=2, default=str)}")
+    print("\nRunning with parameters:")
+    print(json.dumps({**common, **params, "capital": capital, "risk_pct": risk_pct, "entry_fee": entry_fee, "exit_fee": exit_fee}, indent=2, default=str))
 
-    start_ms = int(datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
+    start_ms = int(datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
     end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    print(f"\nFetching {args.timeframe} klines from {args.start} ...")
-    df_entry = fetch_klines(args.symbol, tf_cfg["interval"], start_ms, end_ms)
+    print(f"\nFetching {tf} klines ...")
+    df_entry = fetch_klines("BTCUSDT", tf_cfg["interval"], start_ms, end_ms)
     print(f"  -> {len(df_entry)} rows, {df_entry['timestamp'].iloc[0]} -> {df_entry['timestamp'].iloc[-1]}")
 
     print(f"Fetching {tf_cfg['htf_interval']} HTF klines ...")
-    df_htf = fetch_klines(args.symbol, tf_cfg["htf_interval"], start_ms, end_ms)
+    df_htf = fetch_klines("BTCUSDT", tf_cfg["htf_interval"], start_ms, end_ms)
     print(f"  -> {len(df_htf)} rows, {df_htf['timestamp'].iloc[0]} -> {df_htf['timestamp'].iloc[-1]}")
 
-    fixed_risk_amount = args.capital * args.risk_pct if USE_FIXED_RISK else None
-    fixed_daily_loss_cap = fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else args.capital * 0.003
+    fixed_risk_amount = capital * risk_pct if USE_FIXED_RISK else None
+    fixed_daily_loss_cap = fixed_risk_amount * DAILY_LOSS_CAP_MULTIPLIER if USE_FIXED_RISK else capital * 0.003
 
     print("\nRunning backtest with realistic FVG midpoint limit fills ...")
     result = run_backtest(
         df_entry,
         df_htf,
-        capital=args.capital,
-        risk_per_trade_pct=None if USE_FIXED_RISK else args.risk_pct,
+        capital=capital,
+        risk_per_trade_pct=None if USE_FIXED_RISK else risk_pct,
         fixed_risk_amount=fixed_risk_amount,
         daily_loss_cap_pct=None,
         fixed_daily_loss_cap=fixed_daily_loss_cap,
-        entry_cost_pct=args.entry_fee,
-        exit_cost_pct=args.exit_fee,
+        entry_cost_pct=entry_fee,
+        exit_cost_pct=exit_fee,
         **common,
         **params,
     )
 
     trades_df = result["trades"]
     equity_df = result["equity"]
-    metrics = compute_metrics(equity_df, trades_df, args.capital)
+    metrics = compute_metrics(equity_df, trades_df, capital)
 
     print("\n=== RESULTS ===")
     for k, v in metrics.items():
@@ -202,13 +212,35 @@ def main():
         else:
             print(f"{k:30s}: {v}")
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = RESULTS_DIR / f"fvg_{args.timeframe}_{timestamp}.csv"
     if not trades_df.empty:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        os.makedirs(RESULTS_DIR, exist_ok=True)
+        out_path = RESULTS_DIR / f"fvg_{tf}_{timestamp}.csv"
         trades_df.to_csv(out_path, index=False)
         print(f"\nSaved trade log to {out_path}")
     else:
         print("\nNo trades generated.")
+
+
+def main():
+    print("\n=== Interactive FVG Backtest ===")
+    print("Default data window is the last 5 years.")
+
+    five_years_ago = (datetime.now(timezone.utc) - timedelta(days=5 * 365)).strftime("%Y-%m-%d")
+    start_date = ask("Start date (YYYY-MM-DD)", five_years_ago)
+
+    tf = ask_choice("Entry timeframe", ["30m", "1h", "daily"], "1h")
+    if tf is None:
+        tf = "1h"
+
+    while True:
+        run_one_backtest(tf, start_date)
+
+        again = input("\nRun again with different parameters? (y/n) [y]: ").strip().lower()
+        if again in ("n", "no"):
+            print("Exiting. Goodbye!")
+            break
+        # Keep same timeframe and start date, change parameters
 
 
 if __name__ == "__main__":
